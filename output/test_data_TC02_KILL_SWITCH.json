@@ -1,0 +1,152 @@
+{
+  "_test_meta": {
+    "test_case_id": "TC02_KILL_SWITCH_TRIGGERED",
+    "description": "异常终止面试：guard 触发 kill_switch，应走 KILL_SWITCH 分支并生成含 kill_switch_info 的异常报告",
+    "expected_branch": "KILL_SWITCH",
+    "expected_report_mode": "KILL_SWITCH",
+    "mock_data_notice": "除 _test_meta 外，所有字段均为编造占位数据，接入生产时需替换为上游工作流真实输出"
+  },
+  "systemFields": {
+    "USER_INPUT": "生成面试报告",
+    "FILES_INPUT": [],
+    "EVENT_INPUT": {
+      "EventName": "GENERATE_REPORT",
+      "EventPayload": {
+        "trigger": "auto_on_kill_switch",
+        "request_id": "req_tc02_20260629_002"
+      }
+    }
+  },
+  "userFields": {
+    "candidate_profile": {
+      "_source": "[MOCK] 将来替换为 WF_ProfileBuilder 输出",
+      "candidate_id": "cand_20240320_088",
+      "name": "王芳",
+      "target_role": "LLM 应用工程师",
+      "years_experience": 2,
+      "education": "上海交通大学 软件工程本科",
+      "highlights": [
+        "参与 RAG 知识库项目",
+        "有 Prompt 调优经验"
+      ],
+      "resume_summary": "2年 LLM 应用开发，熟悉 RAG 与 Agent 基础概念"
+    },
+    "paper_facts": {
+      "_source": "[MOCK] 将来替换为 WF_PaperFactExtractor 输出",
+      "paper_id": "paper_rag_harmony_2024",
+      "title": "鸿蒙生态下的轻量级 RAG 检索增强方案",
+      "authors": ["王芳"],
+      "venue": "harmony_dev_conf_2024",
+      "key_claims": [
+        {
+          "claim_id": "c1",
+          "text": "检索延迟 P95 低于 200ms（在 10 万文档规模测试集上）",
+          "evidence_section": "5.3"
+        },
+        {
+          "claim_id": "c2",
+          "text": "采用混合检索：向量 + BM25",
+          "evidence_section": "3.1"
+        }
+      ],
+      "verified_facts": [
+        "使用 HarmonyOS 本地向量索引",
+        "支持知识库增量更新"
+      ]
+    },
+    "prompt_pack": {
+      "_source": "[MOCK] 将来替换为 WF_PromptPack 输出",
+      "pack_version": "1.2.0",
+      "scoring_override": null,
+      "interview_style": "technical_deep_dive",
+      "language": "zh-CN"
+    },
+    "session_state": {
+      "_source": "[MOCK] 将来替换为 WF_SessionManager 输出",
+      "session_id": "sess_tc02_20260629",
+      "is_finished": false,
+      "kill_switch_reason": "PAPER_FACT_CONFLICT: 候选人声称 P95 延迟 50ms，与 paper_facts 中 200ms 矛盾",
+      "current_stage": "Y",
+      "started_at": "2026-06-29T14:00:00+08:00",
+      "finished_at": null,
+      "total_rounds": 5,
+      "kill_switch_meta": {
+        "triggered_at": "2026-06-29T14:18:00+08:00",
+        "trigger_turn_id": "t05",
+        "guard_rule_id": "paper_fact_conflict_v1"
+      }
+    },
+    "conversation_trace": {
+      "_source": "[MOCK] 将来替换为 WF_Interview 输出",
+      "trace_id": "trace_tc02",
+      "turns": [
+        {
+          "turn_id": "t01",
+          "stage": "X",
+          "stage_id": 1,
+          "round_type": "foundation",
+          "role": "interviewer",
+          "content": "请介绍你论文中的 RAG 架构。"
+        },
+        {
+          "turn_id": "t02",
+          "stage": "X",
+          "stage_id": 1,
+          "round_type": "foundation",
+          "role": "candidate",
+          "content": "采用混合检索，向量索引在端侧运行，支持增量更新。"
+        },
+        {
+          "turn_id": "t03",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "interviewer",
+          "content": "论文中 P95 检索延迟是多少？测试规模多大？"
+        },
+        {
+          "turn_id": "t04",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "candidate",
+          "content": "我们在生产环境测过，P95 大约 50ms，文档量大概一万条。"
+        },
+        {
+          "turn_id": "t05",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "system",
+          "content": "[GUARD] paper_fact_conflict detected: candidate said 50ms/10k docs vs paper_facts 200ms/100k docs. Session halted."
+        }
+      ]
+    },
+    "guard_status": {
+      "_source": "[MOCK] 将来替换为 WF_InputGuard 输出",
+      "triggered": true,
+      "trigger_count": 1,
+      "last_trigger_turn_id": "t05",
+      "rules_fired": [
+        {
+          "rule_id": "paper_fact_conflict_v1",
+          "severity": "critical",
+          "message": "候选人陈述与 paper_facts 量化指标冲突"
+        }
+      ]
+    },
+    "paper_status": {
+      "_source": "[MOCK] 将来替换为 WF_PaperFactValidator 输出",
+      "validation_passed": false,
+      "unverified_claims": ["c1"],
+      "conflict_details": [
+        {
+          "claim_id": "c1",
+          "paper_value": "P95 < 200ms @ 100k docs",
+          "candidate_value": "P95 ~ 50ms @ 10k docs"
+        }
+      ],
+      "last_validated_at": "2026-06-29T14:17:30+08:00"
+    }
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "_test_meta": {
+    "test_case_id": "TC01_NORMAL_FINISHED",
+    "description": "正常结束面试：session_state.is_finished=true，无 kill_switch，应走 NORMAL 分支并生成完整结晶化报告",
+    "expected_branch": "NORMAL",
+    "expected_report_mode": "NORMAL",
+    "mock_data_notice": "除 _test_meta 外，所有字段均为编造占位数据，接入生产时需替换为上游工作流真实输出"
+  },
+  "systemFields": {
+    "USER_INPUT": "请生成本次面试的结晶化报告",
+    "FILES_INPUT": [],
+    "EVENT_INPUT": {
+      "EventName": "GENERATE_REPORT",
+      "EventPayload": {
+        "trigger": "user_request",
+        "request_id": "req_tc01_20260629_001"
+      }
+    }
+  },
+  "userFields": {
+    "candidate_profile": {
+      "_source": "[MOCK] 将来替换为 WF_ProfileBuilder 输出",
+      "candidate_id": "cand_20240615_001",
+      "name": "张明",
+      "target_role": "AI Agent 工程师",
+      "years_experience": 4,
+      "education": "浙江大学 计算机硕士",
+      "highlights": [
+        "主导过小艺智能体工作流编排",
+        "熟悉 HarmonyOS Agent Framework"
+      ],
+      "resume_summary": "4年后端+Agent开发经验，擅长工作流编排与 Prompt 工程"
+    },
+    "paper_facts": {
+      "_source": "[MOCK] 将来替换为 WF_PaperFactExtractor 输出",
+      "paper_id": "paper_agent_workflow_2025",
+      "title": "基于状态机的工作流 Agent 可靠性增强",
+      "authors": ["张明", "李华"],
+      "venue": "internal_tech_report_2025",
+      "key_claims": [
+        {
+          "claim_id": "c1",
+          "text": "提出 Kill-Switch 守卫机制，可在检测到幻觉时中断会话",
+          "evidence_section": "3.2"
+        },
+        {
+          "claim_id": "c2",
+          "text": "工作流节点间采用显式 schema 校验，报告完整性提升 23%",
+          "evidence_section": "4.1"
+        }
+      ],
+      "verified_facts": [
+        "系统支持 18 种工作流节点",
+        "报告结晶化输出 6 个必填 section"
+      ]
+    },
+    "prompt_pack": {
+      "_source": "[MOCK] 将来替换为 WF_PromptPack 输出",
+      "pack_version": "1.2.0",
+      "scoring_override": null,
+      "interview_style": "technical_deep_dive",
+      "language": "zh-CN"
+    },
+    "session_state": {
+      "_source": "[MOCK] 将来替换为 WF_SessionManager 输出",
+      "session_id": "sess_tc01_20260629",
+      "is_finished": true,
+      "kill_switch_reason": "",
+      "current_stage": "Z",
+      "started_at": "2026-06-29T09:00:00+08:00",
+      "finished_at": "2026-06-29T09:45:00+08:00",
+      "total_rounds": 9
+    },
+    "conversation_trace": {
+      "_source": "[MOCK] 将来替换为 WF_Interview 输出",
+      "trace_id": "trace_tc01",
+      "turns": [
+        {
+          "turn_id": "t01",
+          "stage": "X",
+          "stage_id": 1,
+          "round_type": "foundation",
+          "role": "interviewer",
+          "content": "请介绍你论文中 Kill-Switch 守卫机制的设计动机。"
+        },
+        {
+          "turn_id": "t02",
+          "stage": "X",
+          "stage_id": 1,
+          "round_type": "foundation",
+          "role": "candidate",
+          "content": "当检测到模型输出与 paper_facts 冲突时，状态机会触发 kill_switch_reason 并中断后续轮次，避免错误事实污染报告。"
+        },
+        {
+          "turn_id": "t03",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "interviewer",
+          "content": "状态机中 NORMAL 与 KILL_SWITCH 分支的优先级如何定义？"
+        },
+        {
+          "turn_id": "t04",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "candidate",
+          "content": "KILL_SWITCH 优先级最高：先判断 kill_switch_reason 是否非空；否则再判断 is_finished。"
+        },
+        {
+          "turn_id": "t05",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "interviewer",
+          "content": "评分量表为何固定四个维度？"
+        },
+        {
+          "turn_id": "t06",
+          "stage": "Y",
+          "stage_id": 2,
+          "round_type": "deep_dive",
+          "role": "candidate",
+          "content": "四维度覆盖组件创新、流程控制、Prompt 防御与报告结晶化，且每维 0-5 锚点降低模型打分随机性。"
+        },
+        {
+          "turn_id": "t07",
+          "stage": "Z",
+          "stage_id": 3,
+          "round_type": "synthesis",
+          "role": "interviewer",
+          "content": "如果候选人只完成 X 阶段，工作流应如何处理？"
+        },
+        {
+          "turn_id": "t08",
+          "stage": "Z",
+          "stage_id": 3,
+          "round_type": "synthesis",
+          "role": "candidate",
+          "content": "走 default 分支输出 INCOMPLETE 占位报告，不调用全量 LLM，避免生成不可靠终版报告。"
+        },
+        {
+          "turn_id": "t09",
+          "stage": "Z",
+          "stage_id": 3,
+          "round_type": "synthesis",
+          "role": "interviewer",
+          "content": "感谢，本次面试结束。"
+        }
+      ]
+    },
+    "guard_status": {
+      "_source": "[MOCK] 将来替换为 WF_InputGuard 输出",
+      "triggered": false,
+      "trigger_count": 0,
+      "last_trigger_turn_id": null,
+      "rules_fired": []
+    },
+    "paper_status": {
+      "_source": "[MOCK] 将来替换为 WF_PaperFactValidator 输出",
+      "validation_passed": true,
+      "unverified_claims": [],
+      "last_validated_at": "2026-06-29T09:05:00+08:00"
+    }
+  }
+}
