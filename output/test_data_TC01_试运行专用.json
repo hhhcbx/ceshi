@@ -28,6 +28,8 @@
     "interview_style": "technical",
     "language": "zh-CN"
   },
+  "is_finished": true,
+  "kill_switch_reason": "",
   "session_state": {
     "session_id": "sess_001",
     "is_finished": true,
