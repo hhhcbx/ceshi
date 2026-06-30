@@ -7,7 +7,9 @@
     "max_turns_per_round": 2
   },
   "session_state": {},
-  "conversation_trace": "{\"turns\": []}",
+  "conversation_trace": {
+    "turns": []
+  },
   "user_answer": "",
   "current_stage": ""
 }

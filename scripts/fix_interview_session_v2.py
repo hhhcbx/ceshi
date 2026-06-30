@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-Fix conversation_trace not updating (stays at input).
+Fix Interview Session V2 - align types with working MVP_1, separate in/out trace fields.
 
-Root cause on Xiaoyi:
-- Object-typed input/output with same semantic field pass through input unchanged
-- LLM JSON nested object mapping to output params is unreliable
-
-Fix:
-- Input param: history_trace (String, JSON text)
-- Output param: conversation_trace (String, JSON text) — enabled
-- Enable all JSON output fields for mapping
-- END returns session_step_json String
+Type errors (应为 boolean/object) caused by:
+- String output fields when platform/LLM returns Object
+- required:true on outputs (working ref uses required:false, enabled:false)
+- END session_step_json type mismatch (Object vs String)
 """
 
 import json
@@ -20,37 +15,39 @@ LLM_STEP1 = "LLM1979f9a7d4f541a79c6babe12f61cb31"
 LLM_STEP2 = "LLM703a1311197a49509c6973146daa59b6"
 QUESTIONER = "Questioner358948a33f8c48c0aa009b50b57e2935"
 OUTPUT_MAIN = "outputComponent326977145f934cf69c6dec7d4afb2472"
-OUTPUT_Q = "outputComponent0673505583e941029b0f043355afa099"
 END = "ENDf3e1bcb7064b41db9fd52aaad1b4af32"
+LLM_INIT = "LLM12dbd76faf2b426da45439d3b7c4e019"
 
-SYSTEM_PROMPT = """你是“算法面试会话状态机”。
+# Same prompts as working WF_Interview_Session_Engine_MVP_1, with turns wrapper
+SYSTEM_PROMPT = """你是“算法面试会话状态机”，不是普通聊天助手。
 
-每次调用只推进一个 step，必须输出严格 JSON（无 Markdown、无代码块、无解释）。
+你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace_in、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。
 
-关键要求：
-1. 读取 history_trace（JSON 字符串），解析其中 turns 数组
-2. 本轮必须在 turns 末尾追加或更新记录，禁止原样返回空 turns
-3. 输出的 conversation_trace 必须是更新后的完整 JSON 字符串（含 turns 数组）
-4. session_step_json 必须等于本次输出的完整 JSON 对象（字符串形式）
-5. 面试阶段：X_BASE → Y_PROJECT → Z_EXTEND → DONE"""
+你必须严格遵守以下原则：
 
-USER_PROMPT = """推进一次面试，输出严格 JSON。
+1. 只推进一次面试状态
+2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE
+3. conversation_trace_out 必须是对象，格式为 {"turns": [...]}，每轮追加记录
+4. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释
+5. conversation_trace_in.turns 为空时使用 []
+6. current_stage 为空时使用 X_BASE"""
+
+USER_PROMPT = """你是面试会话引擎。推进一次面试状态，输出严格 JSON，不要 Markdown。
 
 prompt_pack: {prompt_pack}
 runtime_config: {runtime_config}
 session_state: {session_state}
-history_trace: {history_trace}
+conversation_trace_in: {conversation_trace_in}
 user_answer: {user_answer}
 current_stage: {current_stage}
 
 规则：
-1. 解析 history_trace JSON 字符串，读取 turns 数组（若为空则 turns=[]）
-2. 若 user_answer 为空（首题）：在 turns 追加一条 answer 为空的记录，question=interviewer_question
-3. 若 user_answer 非空：更新 turns 最后一条的 answer，或追加新记录
-4. conversation_trace 字段输出更新后的 JSON 字符串，格式：{"turns":[...]}
-5. 禁止 conversation_trace 与 history_trace 完全相同（除非 turns 确实无变化且已记录本题）
+1. 读取 conversation_trace_in.turns，本轮必须更新 conversation_trace_out.turns（追加或填写 answer）
+2. user_answer 非空时，把上一题和答案写入 turns
+3. 禁止 conversation_trace_out 与 conversation_trace_in 完全相同
+4. 按 X_BASE → Y_PROJECT → Z_EXTEND 推进
 
-输出 JSON（所有字段必填）：
+输出 JSON Schema：
 {
   "session_state": {
     "current_stage": "X_BASE|Y_PROJECT|Z_EXTEND|DONE",
@@ -58,16 +55,27 @@ current_stage: {current_stage}
     "turn_counter_in_current_round": 0,
     "is_finished": false,
     "kill_switch_reason": "",
+    "last_question_id": "",
     "last_question": "",
     "last_stage": "",
     "last_round_index": 0,
     "last_turn_index": 0
   },
-  "conversation_trace": "{\\"turns\\":[...]}",
+  "conversation_trace_out": {
+    "turns": [
+      {
+        "stage": "string",
+        "round_index": 0,
+        "turn_index": 0,
+        "question": "string",
+        "answer": "string",
+        "trace_type": "normal|empty_answer|defense_rejection"
+      }
+    ]
+  },
   "interviewer_question": "string",
   "current_stage_out": "X_BASE|Y_PROJECT|Z_EXTEND|DONE",
-  "is_finished_out": false,
-  "session_step_json": "{\\"...full json...\\"}"
+  "is_finished_out": false
 }"""
 
 
@@ -79,36 +87,75 @@ def start(path):
     return ref(START, f"userFields.{path}")
 
 
-def llm_outputs():
+def llm_outputs_working():
+    """Match working MVP_1 types + conversation_trace_out + session_state for chaining."""
     return [
-        {"name": "session_step_json", "type": "String", "description": "完整步骤 JSON 字符串", "required": True, "enabled": True},
-        {"name": "interviewer_question", "type": "String", "description": "当前问题", "required": True, "enabled": True},
-        {"name": "current_stage_out", "type": "String", "description": "当前阶段", "required": True, "enabled": True},
-        {"name": "is_finished_out", "type": "Boolean", "description": "是否结束", "required": True, "enabled": True},
-        {"name": "conversation_trace", "type": "String", "description": "更新后问答记录 JSON 字符串", "required": True, "enabled": True},
-        {"name": "session_state", "type": "Object", "description": "会话状态", "required": True, "enabled": True},
+        {"name": "session_step_json", "type": "String", "description": "", "required": False, "enabled": False},
+        {"name": "interviewer_question", "type": "String", "description": "", "required": False, "enabled": False},
+        {"name": "current_stage_out", "type": "String", "description": "", "required": False, "enabled": False},
+        {"name": "is_finished_out", "type": "Boolean", "description": "", "required": False, "enabled": False},
+        {"name": "session_state", "type": "Object", "description": "会话状态", "required": False, "enabled": True},
+        {
+            "name": "conversation_trace_out",
+            "type": "Object",
+            "description": "更新后的问答记录 {turns:[]}",
+            "required": False,
+            "enabled": True,
+        },
     ]
+
+
+def input_field(name, ftype, required, desc, value):
+    return {
+        "name": name,
+        "type": ftype,
+        "required": required,
+        "description": desc,
+        "value": value,
+        "sourceType": "ref",
+        "refType": ftype,
+        "expanded": False,
+        "descExpanded": False,
+    }
 
 
 def llm_inputs_step1():
     return [
-        {"name": "prompt_pack", "type": "String", "required": True, "description": "Prompt 包", "value": start("prompt_pack"), "sourceType": "ref", "refType": "String"},
-        {"name": "runtime_config", "type": "Object", "required": True, "description": "运行配置", "value": start("runtime_config"), "sourceType": "ref", "refType": "Object"},
-        {"name": "session_state", "type": "Object", "required": False, "description": "会话状态", "value": start("session_state"), "sourceType": "ref", "refType": "Object"},
-        {"name": "history_trace", "type": "String", "required": False, "description": "历史问答 JSON 字符串", "value": start("conversation_trace"), "sourceType": "ref", "refType": "String"},
-        {"name": "user_answer", "type": "String", "required": False, "description": "用户回答", "value": start("user_answer"), "sourceType": "ref", "refType": "String"},
-        {"name": "current_stage", "type": "String", "required": False, "description": "当前阶段", "value": start("current_stage"), "sourceType": "ref", "refType": "String"},
+        input_field("prompt_pack", "String", True, "面试官 Prompt 包", start("prompt_pack")),
+        input_field("runtime_config", "Object", True, "运行配置", start("runtime_config")),
+        input_field("session_state", "Object", False, "会话状态", start("session_state")),
+        input_field("conversation_trace_in", "Object", False, "历史问答", start("conversation_trace")),
+        input_field("user_answer", "String", False, "用户回答", start("user_answer")),
+        input_field("current_stage", "String", False, "当前阶段", start("current_stage")),
     ]
 
 
 def llm_inputs_step2():
     return [
-        {"name": "prompt_pack", "type": "String", "required": True, "description": "Prompt 包", "value": start("prompt_pack"), "sourceType": "ref", "refType": "String"},
-        {"name": "runtime_config", "type": "Object", "required": True, "description": "运行配置", "value": start("runtime_config"), "sourceType": "ref", "refType": "Object"},
-        {"name": "session_state", "type": "Object", "required": False, "description": "会话状态", "value": ref(LLM_STEP1, "userFields.session_state"), "sourceType": "ref", "refType": "Object"},
-        {"name": "history_trace", "type": "String", "required": False, "description": "上一步问答 JSON", "value": ref(LLM_STEP1, "userFields.conversation_trace"), "sourceType": "ref", "refType": "String"},
-        {"name": "user_answer", "type": "String", "required": False, "description": "提问器回答", "value": ref(QUESTIONER, "preDefinedFields.userResponse"), "sourceType": "ref", "refType": "String"},
-        {"name": "current_stage", "type": "String", "required": False, "description": "当前阶段", "value": ref(LLM_STEP1, "userFields.current_stage_out"), "sourceType": "ref", "refType": "String"},
+        input_field("prompt_pack", "String", True, "面试官 Prompt 包", start("prompt_pack")),
+        input_field("runtime_config", "Object", True, "运行配置", start("runtime_config")),
+        input_field("session_state", "Object", False, "会话状态", ref(LLM_STEP1, "userFields.session_state")),
+        input_field(
+            "conversation_trace_in",
+            "Object",
+            False,
+            "上一步问答记录",
+            ref(LLM_STEP1, "userFields.conversation_trace_out"),
+        ),
+        input_field(
+            "user_answer",
+            "String",
+            False,
+            "提问器回答",
+            ref(QUESTIONER, "preDefinedFields.userResponse"),
+        ),
+        input_field(
+            "current_stage",
+            "String",
+            False,
+            "当前阶段",
+            ref(LLM_STEP1, "userFields.current_stage_out"),
+        ),
     ]
 
 
@@ -117,16 +164,12 @@ def build():
     with open(src, encoding="utf-8") as f:
         wf = json.load(f)
 
-    # Remove init LLM if still present
-    wf["schema"]["components"] = [
-        c for c in wf["schema"]["components"] if c["id"] != "LLM12dbd76faf2b426da45439d3b7c4e019"
-    ]
+    wf["schema"]["components"] = [c for c in wf["schema"]["components"] if c["id"] != LLM_INIT]
     wf["schema"]["connections"] = [
-        c for c in wf["schema"]["connections"]
-        if c.get("target") != "LLM12dbd76faf2b426da45439d3b7c4e019"
-        and c.get("source") != "LLM12dbd76faf2b426da45439d3b7c4e019"
+        c
+        for c in wf["schema"]["connections"]
+        if c.get("target") != LLM_INIT and c.get("source") != LLM_INIT
     ]
-    # Ensure START -> step1 direct
     if not any(c.get("source") == START and c.get("target") == LLM_STEP1 for c in wf["schema"]["connections"]):
         wf["schema"]["connections"].insert(
             0,
@@ -145,21 +188,35 @@ def build():
     start_node = components[START]
     for field in start_node["outputs"][1]["fields"]:
         if field["name"] == "conversation_trace":
-            field["type"] = "String"
-            field["description"] = '历史问答 JSON 字符串，首次传 {"turns":[]}（注意是字符串类型）'
-            field.pop("nextOutputParamInfo", None)
+            field["type"] = "Object"
+            field["description"] = '历史问答，首次传 {"turns":[]}'
+            field["nextOutputParamInfo"] = [
+                {
+                    "name": "turns",
+                    "type": "Object",
+                    "description": "问答轮次",
+                    "required": False,
+                    "value": "",
+                    "sourceType": "ref",
+                    "expanded": True,
+                    "descExpanded": False,
+                }
+            ]
 
     for lid in (LLM_STEP1, LLM_STEP2):
         llm = components[lid]
         llm["inputs"][0]["fields"] = llm_inputs_step1() if lid == LLM_STEP1 else llm_inputs_step2()
-        llm["outputs"][0]["fields"] = llm_outputs()
+        llm["outputs"][0]["fields"] = llm_outputs_working()
         llm["configs"]["templateContent"] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": USER_PROMPT},
         ]
 
     end = components[END]
+    end["outputs"][0]["fields"][0]["name"] = "session_step_json"
+    end["outputs"][0]["fields"][0]["type"] = "String"
     end["outputs"][0]["fields"][0]["value"] = ref(LLM_STEP2, "userFields.session_step_json")
+    end["outputs"][0]["fields"][0]["refType"] = "String"
 
     out_main = components[OUTPUT_MAIN]
     out_main["outputs"][0]["fields"] = [
@@ -174,29 +231,19 @@ def build():
             "isStreamOut": False,
         },
         {
-            "name": "conversation_trace",
-            "type": "String",
+            "name": "conversation_trace_out",
+            "type": "Object",
             "required": True,
             "description": "",
-            "value": ref(LLM_STEP2, "userFields.conversation_trace"),
+            "value": ref(LLM_STEP2, "userFields.conversation_trace_out"),
             "sourceType": "ref",
-            "refType": "String",
-            "isStreamOut": False,
-        },
-        {
-            "name": "session_step_json",
-            "type": "String",
-            "required": True,
-            "description": "",
-            "value": ref(LLM_STEP2, "userFields.session_step_json"),
-            "sourceType": "ref",
-            "refType": "String",
+            "refType": "Object",
             "isStreamOut": False,
         },
     ]
     out_main["configs"]["responseTemplate"] = "${interviewer_question}"
 
-    wf["description"] = "面试会话引擎 V2 v3-fix：conversation_trace 改为 String JSON，入参 history_trace 与出参分离"
+    wf["description"] = "面试会话引擎 V2 v4：类型对齐 MVP_1，conversation_trace_in/out 分离"
     return wf
 
 
@@ -209,7 +256,7 @@ if __name__ == "__main__":
         "prompt_pack": "你是技术面试官，请出算法题。",
         "runtime_config": {"round_x": 1, "round_y": 1, "round_z": 1, "max_turns_per_round": 2},
         "session_state": {},
-        "conversation_trace": '{"turns": []}',
+        "conversation_trace": {"turns": []},
         "user_answer": "",
         "current_stage": "",
     }
