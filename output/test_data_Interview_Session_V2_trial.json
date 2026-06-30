@@ -1,0 +1,15 @@
+{
+  "prompt_pack": "你是技术面试官，请出算法题。",
+  "runtime_config": {
+    "round_x": 1,
+    "round_y": 1,
+    "round_z": 1,
+    "max_turns_per_round": 2
+  },
+  "session_state": {},
+  "conversation_trace": {
+    "turns": []
+  },
+  "user_answer": "",
+  "current_stage": ""
+}

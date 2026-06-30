@@ -1,5 +1,5 @@
 {
-    "description": "面试会话引擎 V2（已修复 conversation_trace 传递）：初始化→首题→提问器→推进",
+    "description": "面试会话引擎 V2 v2-fix：conversation_trace 用 {turns:[]} 包装，从 START 直传",
     "iconUri": "D1EXoq5m1fpQ2SSSWi5R0MUAw",
     "iconUrl": "https://contentcenter-drcn.dbankcdn.com/pub_21/FaStore_fa_900_9/bb/v3/fa/osms/1/1/258f1e01664a482287667a426dc88418/53d0cad8b723480ca1db00ccc049ce05.png",
     "name": "WF_Interview_Session_Engine_MVP_V2_hn_3",
@@ -117,12 +117,24 @@
                             {
                                 "name": "conversation_trace",
                                 "type": "Object",
-                                "description": "历史问答记录数组；首次传 [] 或留空",
+                                "description": "历史问答；首次传 {\"turns\":[]}，禁止传裸数组 []",
                                 "required": false,
                                 "value": "",
                                 "id": 782,
                                 "fieldType": "userFields",
-                                "sourceType": "ref"
+                                "sourceType": "ref",
+                                "nextOutputParamInfo": [
+                                    {
+                                        "name": "turns",
+                                        "type": "Object",
+                                        "description": "问答轮次列表",
+                                        "required": false,
+                                        "value": "",
+                                        "sourceType": "ref",
+                                        "expanded": true,
+                                        "descExpanded": false
+                                    }
+                                ]
                             },
                             {
                                 "name": "user_answer",
@@ -137,7 +149,7 @@
                             {
                                 "name": "current_stage",
                                 "type": "String",
-                                "description": "当前阶段 X_BASE|Y_PROJECT|Z_EXTEND|DONE；首次可空",
+                                "description": "默认值为X_BASE",
                                 "required": false,
                                 "value": "",
                                 "id": 227,
@@ -204,7 +216,7 @@
                                 "type": "Object",
                                 "required": false,
                                 "description": "历史问答",
-                                "value": "${LLM12dbd76faf2b426da45439d3b7c4e019.userFields.conversation_trace}",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.conversation_trace}",
                                 "sourceType": "ref",
                                 "refType": "Object"
                             },
@@ -225,15 +237,6 @@
                                 "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.current_stage}",
                                 "sourceType": "ref",
                                 "refType": "String"
-                            },
-                            {
-                                "name": "stage_list",
-                                "type": "Array<String>",
-                                "required": false,
-                                "description": "难度列表",
-                                "value": "${LLM12dbd76faf2b426da45439d3b7c4e019.userFields.stage_list}",
-                                "sourceType": "ref",
-                                "refType": "Array<String>"
                             }
                         ]
                     }
@@ -243,44 +246,44 @@
                         "name": "userFields",
                         "fields": [
                             {
-                                "name": "session_state",
-                                "type": "Object",
-                                "description": "会话状态",
+                                "name": "session_step_json",
+                                "type": "String",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
-                            },
-                            {
-                                "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "问答记录数组",
-                                "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "interviewer_question",
                                 "type": "String",
-                                "description": "当前问题",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "current_stage_out",
                                 "type": "String",
-                                "description": "当前阶段",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "is_finished_out",
                                 "type": "Boolean",
-                                "description": "是否结束",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "description": "问答记录 {turns:[]}",
                                 "required": false,
                                 "enabled": true
                             },
                             {
-                                "name": "session_step_json",
+                                "name": "session_state",
                                 "type": "Object",
-                                "description": "完整步骤 JSON",
+                                "description": "会话状态",
                                 "required": false,
                                 "enabled": true
                             }
@@ -308,11 +311,11 @@
                     "templateContent": [
                         {
                             "role": "system",
-                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage、stage_list，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是数组，每轮追加记录，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
+                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是对象，内含 turns 数组；每轮追加到 turns，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace.turns 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
                         },
                         {
                             "role": "user",
-                            "content": "你是面试会话引擎。推进一次面试状态，输出严格 JSON。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\nstage_list: {stage_list}\n\n规则：\n1. 首次运行 current_stage 优先用入参，否则从 session_state.current_stage 推断，仍为空则 X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 推进，完成后 current_stage=DONE、is_finished=true\n4. conversation_trace 必须输出完整数组（包含历史 + 本轮新增）\n5. stage_list 是难度参考列表，不要与 current_stage 混淆\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": [\n    {\n      \"stage\": \"string\",\n      \"round_index\": 0,\n      \"turn_index\": 0,\n      \"question\": \"string\",\n      \"answer\": \"string\",\n      \"trace_type\": \"normal|empty_answer|defense_rejection\"\n    }\n  ],\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": {}\n}"
+                            "content": "你是面试会话引擎。请根据 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 首次运行时初始化 current_stage=X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace.turns 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 顺序推进\n4. 全部阶段完成后 current_stage=DONE，is_finished=true\n5. conversation_trace 必须输出完整对象（含历史 turns）\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"string\"\n}"
                         }
                     ],
                     "responseFormat": {
@@ -353,12 +356,12 @@
                         "fields": [
                             {
                                 "name": "session_step_json",
-                                "type": "Object",
+                                "type": "String",
                                 "required": true,
-                                "description": "完整步骤 JSON（含 session_state 与 conversation_trace）",
+                                "description": "MVP 兜底完整 JSON",
                                 "sourceType": "ref",
                                 "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.session_step_json}",
-                                "refType": "Object",
+                                "refType": "String",
                                 "isStreamOut": false
                             }
                         ]
@@ -376,94 +379,6 @@
                     "responseLabel": "返回变量",
                     "isStreamingText": false
                 }
-            },
-            {
-                "id": "LLM12dbd76faf2b426da45439d3b7c4e019",
-                "type": "AgentLargeModel",
-                "dimensions": {
-                    "width": 248,
-                    "height": 56
-                },
-                "selected": false,
-                "dragging": false,
-                "resizing": false,
-                "initialized": false,
-                "isParent": false,
-                "position": {
-                    "x": 351.6799621825408,
-                    "y": -48.554109752122486
-                },
-                "events": {},
-                "label": "初始化变量",
-                "description": "调用大模型，根据入参和Prompt，生成回复",
-                "inputs": [
-                    {
-                        "name": "userFields",
-                        "fields": []
-                    }
-                ],
-                "outputs": [
-                    {
-                        "name": "userFields",
-                        "fields": [
-                            {
-                                "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "初始空数组",
-                                "required": false,
-                                "enabled": true
-                            },
-                            {
-                                "name": "stage_list",
-                                "type": "Array<String>",
-                                "description": "难度列表",
-                                "required": false,
-                                "enabled": true
-                            }
-                        ]
-                    }
-                ],
-                "configs": {
-                    "deployMode": "workflow",
-                    "model": {
-                        "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT",
-                        "llmBrand": "DeepSeek",
-                        "llmName": "DeepSeek-V3 增强版",
-                        "llmContextLength": "32k",
-                        "llmOwner": 1,
-                        "hyperParameters": [
-                            {
-                                "temperature": 0.6,
-                                "topP": 1,
-                                "topK": 128,
-                                "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT"
-                            }
-                        ],
-                        "llmLogo": "https://hag-ability-test.obs.cn-north-1.myhuaweicloud.com/osms/1/1/90c091f8f35f40329260d30fb279220c/b5271b5a1a8b41fba98bc506eac5d4e4.png"
-                    },
-                    "templateContent": [
-                        {
-                            "role": "system",
-                            "content": "你只负责初始化变量，输出严格 JSON。"
-                        },
-                        {
-                            "role": "user",
-                            "content": "初始化工作流变量，只输出严格 JSON，不要其他文字。\n\n要求：\n1. conversation_trace 初始化为空数组 []\n2. stage_list 固定为 [\"easy\", \"easy\", \"middle\", \"middle\", \"hard\", \"hard\"]\n\n输出格式：\n{\n  \"conversation_trace\": [],\n  \"stage_list\": [\"easy\", \"easy\", \"middle\", \"middle\", \"hard\", \"hard\"]\n}"
-                        }
-                    ],
-                    "responseFormat": {
-                        "type": "json"
-                    },
-                    "skillList": [],
-                    "context": {
-                        "dialogueHistorySwitch": true,
-                        "dialogueHistoryType": "self"
-                    }
-                },
-                "isRunLoading": false,
-                "stopRunning": true,
-                "isOpenRunDrawer": false,
-                "drawerVisible": false
             },
             {
                 "id": "outputComponent326977145f934cf69c6dec7d4afb2472",
@@ -493,7 +408,7 @@
                                 "name": "interviewer_question",
                                 "type": "String",
                                 "required": true,
-                                "description": "当前面试问题",
+                                "description": "",
                                 "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.interviewer_question}",
                                 "sourceType": "ref",
                                 "refType": "String",
@@ -503,18 +418,8 @@
                                 "name": "conversation_trace",
                                 "type": "Object",
                                 "required": true,
-                                "description": "累积问答记录",
+                                "description": "",
                                 "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.conversation_trace}",
-                                "sourceType": "ref",
-                                "refType": "Object",
-                                "isStreamOut": false
-                            },
-                            {
-                                "name": "session_state",
-                                "type": "Object",
-                                "required": true,
-                                "description": "会话状态",
-                                "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.session_state}",
                                 "sourceType": "ref",
                                 "refType": "Object",
                                 "isStreamOut": false
@@ -527,7 +432,7 @@
                     }
                 ],
                 "configs": {
-                    "responseTemplate": "问题：{interviewer_question}\n\n对话记录：{conversation_trace}",
+                    "responseTemplate": "${interviewer_question}",
                     "isStreamOut": false,
                     "isStreamingText": false,
                     "outputMode": "OutputStream",
@@ -598,7 +503,7 @@
                                 "type": "String",
                                 "required": false,
                                 "description": "用户本轮回答",
-                                "value": "${Questioner358948a33f8c48c0aa009b50b57e2935.userResponse}",
+                                "value": "${Questioner358948a33f8c48c0aa009b50b57e2935.preDefinedFields.userResponse}",
                                 "sourceType": "ref",
                                 "refType": "String"
                             },
@@ -610,15 +515,6 @@
                                 "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.current_stage_out}",
                                 "sourceType": "ref",
                                 "refType": "String"
-                            },
-                            {
-                                "name": "stage_list",
-                                "type": "Array<String>",
-                                "required": false,
-                                "description": "难度列表",
-                                "value": "${LLM12dbd76faf2b426da45439d3b7c4e019.userFields.stage_list}",
-                                "sourceType": "ref",
-                                "refType": "Array<String>"
                             }
                         ]
                     }
@@ -628,44 +524,44 @@
                         "name": "userFields",
                         "fields": [
                             {
-                                "name": "session_state",
-                                "type": "Object",
-                                "description": "会话状态",
+                                "name": "session_step_json",
+                                "type": "String",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
-                            },
-                            {
-                                "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "问答记录数组",
-                                "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "interviewer_question",
                                 "type": "String",
-                                "description": "当前问题",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "current_stage_out",
                                 "type": "String",
-                                "description": "当前阶段",
+                                "description": "",
                                 "required": false,
-                                "enabled": true
+                                "enabled": false
                             },
                             {
                                 "name": "is_finished_out",
                                 "type": "Boolean",
-                                "description": "是否结束",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "description": "问答记录 {turns:[]}",
                                 "required": false,
                                 "enabled": true
                             },
                             {
-                                "name": "session_step_json",
+                                "name": "session_state",
                                 "type": "Object",
-                                "description": "完整步骤 JSON",
+                                "description": "会话状态",
                                 "required": false,
                                 "enabled": true
                             }
@@ -693,11 +589,11 @@
                     "templateContent": [
                         {
                             "role": "system",
-                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage、stage_list，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是数组，每轮追加记录，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
+                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是对象，内含 turns 数组；每轮追加到 turns，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace.turns 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
                         },
                         {
                             "role": "user",
-                            "content": "你是面试会话引擎。推进一次面试状态，输出严格 JSON。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\nstage_list: {stage_list}\n\n规则：\n1. 首次运行 current_stage 优先用入参，否则从 session_state.current_stage 推断，仍为空则 X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 推进，完成后 current_stage=DONE、is_finished=true\n4. conversation_trace 必须输出完整数组（包含历史 + 本轮新增）\n5. stage_list 是难度参考列表，不要与 current_stage 混淆\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": [\n    {\n      \"stage\": \"string\",\n      \"round_index\": 0,\n      \"turn_index\": 0,\n      \"question\": \"string\",\n      \"answer\": \"string\",\n      \"trace_type\": \"normal|empty_answer|defense_rejection\"\n    }\n  ],\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": {}\n}"
+                            "content": "你是面试会话引擎。请根据 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 首次运行时初始化 current_stage=X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace.turns 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 顺序推进\n4. 全部阶段完成后 current_stage=DONE，is_finished=true\n5. conversation_trace 必须输出完整对象（含历史 turns）\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"string\"\n}"
                         }
                     ],
                     "responseFormat": {
@@ -885,22 +781,10 @@
         ],
         "connections": [
             {
-                "id": "edge44b0dd2b5ee34e1a891a02a7a07a520b",
+                "id": "edge_start_step1",
                 "type": "custom",
                 "source": "START2e5c8578e5ad405aac34381256907cc0",
-                "target": "LLM12dbd76faf2b426da45439d3b7c4e019",
-                "targetHandle": "model_left",
-                "style": {
-                    "stroke": "#777",
-                    "strokeWidth": 1
-                }
-            },
-            {
-                "id": "edge30e1b1fa7b2d4a809a3196818a8ee5f3",
-                "type": "custom",
-                "source": "LLM12dbd76faf2b426da45439d3b7c4e019",
                 "target": "LLM1979f9a7d4f541a79c6babe12f61cb31",
-                "sourceHandle": "model_right",
                 "targetHandle": "model_left",
                 "style": {
                     "stroke": "#777",
