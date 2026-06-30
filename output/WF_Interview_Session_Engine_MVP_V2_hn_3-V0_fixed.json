@@ -1,5 +1,5 @@
 {
-    "description": "面试会话引擎 V2 v2-fix：conversation_trace 用 {turns:[]} 包装，从 START 直传",
+    "description": "面试会话引擎 V2 v3-fix：conversation_trace 改为 String JSON，入参 history_trace 与出参分离",
     "iconUri": "D1EXoq5m1fpQ2SSSWi5R0MUAw",
     "iconUrl": "https://contentcenter-drcn.dbankcdn.com/pub_21/FaStore_fa_900_9/bb/v3/fa/osms/1/1/258f1e01664a482287667a426dc88418/53d0cad8b723480ca1db00ccc049ce05.png",
     "name": "WF_Interview_Session_Engine_MVP_V2_hn_3",
@@ -116,25 +116,13 @@
                             },
                             {
                                 "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "历史问答；首次传 {\"turns\":[]}，禁止传裸数组 []",
+                                "type": "String",
+                                "description": "历史问答 JSON 字符串，首次传 {\"turns\":[]}（注意是字符串类型）",
                                 "required": false,
                                 "value": "",
                                 "id": 782,
                                 "fieldType": "userFields",
-                                "sourceType": "ref",
-                                "nextOutputParamInfo": [
-                                    {
-                                        "name": "turns",
-                                        "type": "Object",
-                                        "description": "问答轮次列表",
-                                        "required": false,
-                                        "value": "",
-                                        "sourceType": "ref",
-                                        "expanded": true,
-                                        "descExpanded": false
-                                    }
-                                ]
+                                "sourceType": "ref"
                             },
                             {
                                 "name": "user_answer",
@@ -188,7 +176,7 @@
                                 "name": "prompt_pack",
                                 "type": "String",
                                 "required": true,
-                                "description": "面试官 Prompt 包",
+                                "description": "Prompt 包",
                                 "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.prompt_pack}",
                                 "sourceType": "ref",
                                 "refType": "String"
@@ -212,13 +200,13 @@
                                 "refType": "Object"
                             },
                             {
-                                "name": "conversation_trace",
-                                "type": "Object",
+                                "name": "history_trace",
+                                "type": "String",
                                 "required": false,
-                                "description": "历史问答",
+                                "description": "历史问答 JSON 字符串",
                                 "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.conversation_trace}",
                                 "sourceType": "ref",
-                                "refType": "Object"
+                                "refType": "String"
                             },
                             {
                                 "name": "user_answer",
@@ -248,43 +236,43 @@
                             {
                                 "name": "session_step_json",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "完整步骤 JSON 字符串",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "interviewer_question",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "当前问题",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "current_stage_out",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "当前阶段",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "is_finished_out",
                                 "type": "Boolean",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "是否结束",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "问答记录 {turns:[]}",
-                                "required": false,
+                                "type": "String",
+                                "description": "更新后问答记录 JSON 字符串",
+                                "required": true,
                                 "enabled": true
                             },
                             {
                                 "name": "session_state",
                                 "type": "Object",
                                 "description": "会话状态",
-                                "required": false,
+                                "required": true,
                                 "enabled": true
                             }
                         ]
@@ -311,11 +299,11 @@
                     "templateContent": [
                         {
                             "role": "system",
-                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是对象，内含 turns 数组；每轮追加到 turns，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace.turns 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
+                            "content": "你是“算法面试会话状态机”。\n\n每次调用只推进一个 step，必须输出严格 JSON（无 Markdown、无代码块、无解释）。\n\n关键要求：\n1. 读取 history_trace（JSON 字符串），解析其中 turns 数组\n2. 本轮必须在 turns 末尾追加或更新记录，禁止原样返回空 turns\n3. 输出的 conversation_trace 必须是更新后的完整 JSON 字符串（含 turns 数组）\n4. session_step_json 必须等于本次输出的完整 JSON 对象（字符串形式）\n5. 面试阶段：X_BASE → Y_PROJECT → Z_EXTEND → DONE"
                         },
                         {
                             "role": "user",
-                            "content": "你是面试会话引擎。请根据 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 首次运行时初始化 current_stage=X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace.turns 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 顺序推进\n4. 全部阶段完成后 current_stage=DONE，is_finished=true\n5. conversation_trace 必须输出完整对象（含历史 turns）\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"string\"\n}"
+                            "content": "推进一次面试，输出严格 JSON。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nhistory_trace: {history_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 解析 history_trace JSON 字符串，读取 turns 数组（若为空则 turns=[]）\n2. 若 user_answer 为空（首题）：在 turns 追加一条 answer 为空的记录，question=interviewer_question\n3. 若 user_answer 非空：更新 turns 最后一条的 answer，或追加新记录\n4. conversation_trace 字段输出更新后的 JSON 字符串，格式：{\"turns\":[...]}\n5. 禁止 conversation_trace 与 history_trace 完全相同（除非 turns 确实无变化且已记录本题）\n\n输出 JSON（所有字段必填）：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": \"{\\\"turns\\\":[...]}\",\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"{\\\"...full json...\\\"}\"\n}"
                         }
                     ],
                     "responseFormat": {
@@ -356,12 +344,12 @@
                         "fields": [
                             {
                                 "name": "session_step_json",
-                                "type": "String",
+                                "type": "Object",
                                 "required": true,
                                 "description": "MVP 兜底完整 JSON",
                                 "sourceType": "ref",
                                 "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.session_step_json}",
-                                "refType": "String",
+                                "refType": "Object",
                                 "isStreamOut": false
                             }
                         ]
@@ -416,12 +404,22 @@
                             },
                             {
                                 "name": "conversation_trace",
-                                "type": "Object",
+                                "type": "String",
                                 "required": true,
                                 "description": "",
                                 "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.conversation_trace}",
                                 "sourceType": "ref",
-                                "refType": "Object",
+                                "refType": "String",
+                                "isStreamOut": false
+                            },
+                            {
+                                "name": "session_step_json",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.session_step_json}",
+                                "sourceType": "ref",
+                                "refType": "String",
                                 "isStreamOut": false
                             }
                         ]
@@ -466,7 +464,7 @@
                                 "name": "prompt_pack",
                                 "type": "String",
                                 "required": true,
-                                "description": "面试官 Prompt 包",
+                                "description": "Prompt 包",
                                 "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.prompt_pack}",
                                 "sourceType": "ref",
                                 "refType": "String"
@@ -490,19 +488,19 @@
                                 "refType": "Object"
                             },
                             {
-                                "name": "conversation_trace",
-                                "type": "Object",
+                                "name": "history_trace",
+                                "type": "String",
                                 "required": false,
-                                "description": "历史问答",
+                                "description": "上一步问答 JSON",
                                 "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.conversation_trace}",
                                 "sourceType": "ref",
-                                "refType": "Object"
+                                "refType": "String"
                             },
                             {
                                 "name": "user_answer",
                                 "type": "String",
                                 "required": false,
-                                "description": "用户本轮回答",
+                                "description": "提问器回答",
                                 "value": "${Questioner358948a33f8c48c0aa009b50b57e2935.preDefinedFields.userResponse}",
                                 "sourceType": "ref",
                                 "refType": "String"
@@ -526,43 +524,43 @@
                             {
                                 "name": "session_step_json",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "完整步骤 JSON 字符串",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "interviewer_question",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "当前问题",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "current_stage_out",
                                 "type": "String",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "当前阶段",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "is_finished_out",
                                 "type": "Boolean",
-                                "description": "",
-                                "required": false,
-                                "enabled": false
+                                "description": "是否结束",
+                                "required": true,
+                                "enabled": true
                             },
                             {
                                 "name": "conversation_trace",
-                                "type": "Object",
-                                "description": "问答记录 {turns:[]}",
-                                "required": false,
+                                "type": "String",
+                                "description": "更新后问答记录 JSON 字符串",
+                                "required": true,
                                 "enabled": true
                             },
                             {
                                 "name": "session_state",
                                 "type": "Object",
                                 "description": "会话状态",
-                                "required": false,
+                                "required": true,
                                 "enabled": true
                             }
                         ]
@@ -589,11 +587,11 @@
                     "templateContent": [
                         {
                             "role": "system",
-                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. stage_round_counter 与 turn_counter_in_current_round 分开计数\n4. conversation_trace 必须是对象，内含 turns 数组；每轮追加到 turns，禁止覆盖历史\n5. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n6. conversation_trace.turns 为空时使用 []\n7. current_stage 为空时使用 X_BASE\n8. interviewer_question 必须是当前要展示给用户的问题；若 current_stage=DONE 则输出「面试已完成，正在生成最终报告」"
+                            "content": "你是“算法面试会话状态机”。\n\n每次调用只推进一个 step，必须输出严格 JSON（无 Markdown、无代码块、无解释）。\n\n关键要求：\n1. 读取 history_trace（JSON 字符串），解析其中 turns 数组\n2. 本轮必须在 turns 末尾追加或更新记录，禁止原样返回空 turns\n3. 输出的 conversation_trace 必须是更新后的完整 JSON 字符串（含 turns 数组）\n4. session_step_json 必须等于本次输出的完整 JSON 对象（字符串形式）\n5. 面试阶段：X_BASE → Y_PROJECT → Z_EXTEND → DONE"
                         },
                         {
                             "role": "user",
-                            "content": "你是面试会话引擎。请根据 prompt_pack、runtime_config、session_state、conversation_trace、user_answer、current_stage，推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace: {conversation_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 首次运行时初始化 current_stage=X_BASE\n2. user_answer 非空时，把上一题和答案追加到 conversation_trace.turns 数组末尾\n3. 按 X_BASE → Y_PROJECT → Z_EXTEND 顺序推进\n4. 全部阶段完成后 current_stage=DONE，is_finished=true\n5. conversation_trace 必须输出完整对象（含历史 turns）\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"string\"\n}"
+                            "content": "推进一次面试，输出严格 JSON。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nhistory_trace: {history_trace}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 解析 history_trace JSON 字符串，读取 turns 数组（若为空则 turns=[]）\n2. 若 user_answer 为空（首题）：在 turns 追加一条 answer 为空的记录，question=interviewer_question\n3. 若 user_answer 非空：更新 turns 最后一条的 answer，或追加新记录\n4. conversation_trace 字段输出更新后的 JSON 字符串，格式：{\"turns\":[...]}\n5. 禁止 conversation_trace 与 history_trace 完全相同（除非 turns 确实无变化且已记录本题）\n\n输出 JSON（所有字段必填）：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace\": \"{\\\"turns\\\":[...]}\",\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false,\n  \"session_step_json\": \"{\\\"...full json...\\\"}\"\n}"
                         }
                     ],
                     "responseFormat": {

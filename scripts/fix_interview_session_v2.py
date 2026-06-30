@@ -113,8 +113,32 @@ def llm_inputs_step2():
 
 
 def build():
-    with open("/workspace/output/WF_Interview_Session_Engine_MVP_V2_hn_3-V0_fixed.json", encoding="utf-8") as f:
+    src = "/home/ubuntu/.cursor/projects/workspace/uploads/WF_Interview_Session_Engine_MVP_V2_hn_3-V0_9630.json"
+    with open(src, encoding="utf-8") as f:
         wf = json.load(f)
+
+    # Remove init LLM if still present
+    wf["schema"]["components"] = [
+        c for c in wf["schema"]["components"] if c["id"] != "LLM12dbd76faf2b426da45439d3b7c4e019"
+    ]
+    wf["schema"]["connections"] = [
+        c for c in wf["schema"]["connections"]
+        if c.get("target") != "LLM12dbd76faf2b426da45439d3b7c4e019"
+        and c.get("source") != "LLM12dbd76faf2b426da45439d3b7c4e019"
+    ]
+    # Ensure START -> step1 direct
+    if not any(c.get("source") == START and c.get("target") == LLM_STEP1 for c in wf["schema"]["connections"]):
+        wf["schema"]["connections"].insert(
+            0,
+            {
+                "id": "edge_start_step1",
+                "type": "custom",
+                "source": START,
+                "target": LLM_STEP1,
+                "targetHandle": "model_left",
+                "style": {"stroke": "#777", "strokeWidth": 1},
+            },
+        )
 
     components = {c["id"]: c for c in wf["schema"]["components"]}
 
