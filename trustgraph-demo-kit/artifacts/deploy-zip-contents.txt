@@ -1,0 +1,22 @@
+Archive:  /tmp/trustgraph-deploy-attempt/deploy.zip
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+    16480  2026-07-07 02:24   docker-compose.yaml
+   154218  2026-07-07 02:24   trustgraph/config.json
+      581  2026-07-07 02:24   garage/garage.toml
+     4084  2026-07-07 02:24   grafana/dashboards/log-dashboard.json
+    36012  2026-07-07 02:24   grafana/dashboards/overview-dashboard.json
+      336  2026-07-07 02:24   grafana/provisioning/dashboard.yml
+      773  2026-07-07 02:24   grafana/provisioning/datasource.yml
+     2805  2026-07-07 02:24   launch/control/launch.yaml
+      907  2026-07-07 02:24   launch/embeddings/launch.yaml
+     1170  2026-07-07 02:24   launch/ingest/launch.yaml
+     1692  2026-07-07 02:24   launch/rag/launch.yaml
+      485  2026-07-07 02:24   launch/rows/launch.yaml
+      605  2026-07-07 02:24   launch/text-completion/launch.yaml
+      497  2026-07-07 02:24   launch/triples/launch.yaml
+     1527  2026-07-07 02:24   launch/vector-store/launch.yaml
+      584  2026-07-07 02:24   loki/local-config.yaml
+     2141  2026-07-07 02:24   prometheus/prometheus.yml
+---------                     -------
+   224897                     17 files
