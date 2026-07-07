@@ -41,7 +41,21 @@
 - 8 CPU 推荐
 - 一个可用 LLM 后端
 
-当前云端机器已有 Python 和 Node，但没有 Docker/Podman，因此完整容器 demo 需要继续尝试安装容器运行环境，或在你的本地/服务器运行。
+当前云端机器已有 Python 和 Node。第 2 阶段已尝试安装 Podman 并启动完整栈，但该云端容器缺少可用
+`/dev/net/tun`/tun 内核支持，rootless Podman 无法创建 compose 网络。因此完整 UI/RAG demo
+需要在你的本地或另一台支持 Docker/Podman 网络的服务器运行。
+
+已经生成好的官方部署包在：
+
+```text
+trustgraph-demo-kit/artifacts/deploy-openai-deepseek-compatible.zip
+```
+
+云端尝试记录在：
+
+```text
+trustgraph-demo-kit/artifacts/stage-2-cloud-run.md
+```
 
 ## DeepSeek 配置
 
@@ -164,6 +178,7 @@ Pre-modern European trade routes 中，城市、商品、贸易路线之间是�
 ## 阶段记录
 
 - `notes/stage-1-demo-kit.md`：第 1 阶段，demo kit 与运行方案。
+- `artifacts/stage-2-cloud-run.md`：第 2 阶段，官方部署包生成与云端运行尝试。
 - `notes/ontology-learning-path.md`：ontology/RAG 学习路线。
 - `notes/source-map.md`：TrustGraph 源码结构与重点文件。
 - `artifacts/`：后续云端实跑日志、部署包摘要、截图说明等。
