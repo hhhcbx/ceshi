@@ -122,14 +122,26 @@ trustgraph-flow/trustgraph/query/ontology/
 - ontology cache。
 - ontology query service。
 - SPARQL/Cassandra 查询。
+- question analyzer。
+- ontology matcher。
+- backend router。
+- SPARQL/Cypher generator。
+- answer generator。
 
 还应结合：
 
 ```text
+trustgraph-flow/trustgraph/extract/kg/ontology/
 trustgraph-flow/trustgraph/extract/
 trustgraph-flow/trustgraph/cores/
 trustgraph-base/trustgraph/schema/
 trustgraph-base/trustgraph/provenance/
+```
+
+更详细的 ontology/RAG 源码深读见：
+
+```text
+trustgraph-demo-kit/notes/ontology-rag-source-deep-dive.md
 ```
 
 学习顺序建议：

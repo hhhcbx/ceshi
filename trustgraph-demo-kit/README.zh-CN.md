@@ -181,6 +181,7 @@ Pre-modern European trade routes 中，城市、商品、贸易路线之间是�
 - `artifacts/stage-2-cloud-run.md`：第 2 阶段，官方部署包生成与云端运行尝试。
 - `notes/ontology-learning-path.md`：ontology/RAG 学习路线。
 - `notes/source-map.md`：TrustGraph 源码结构与重点文件。
+- `notes/ontology-rag-source-deep-dive.md`：ontology 抽取、OntoRAG 查询、Graph RAG、Document RAG 源码深读。
 - `artifacts/`：后续云端实跑日志、部署包摘要、截图说明等。
 
 ## 后续阶段计划
