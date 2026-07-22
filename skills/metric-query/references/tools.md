@@ -60,6 +60,7 @@
 要点：
 
 - **指标在 `publishedData.metrics`**；`draftData` 通常为空。
+- 每条指标关注的字段：`measureType` / `nameCn` / `nameEn` / `description` / `type`（BASIC/DERIVED/COMPOSITE）/ `level`（GOLD/HEALTH/NORMAL）/ `tag`。呈现规范见 output-format.md。
 - 两个必填入参**必须**取自 `getNextLevelNode` 的返回，不要自行构造。
 - 字段信息（`fields`）仅在用户明确要字段时才使用，避免无谓的大输出。
 
