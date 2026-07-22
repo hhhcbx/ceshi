@@ -79,22 +79,28 @@
 
 ## getLogicEntityRealModel
 
-**作用**：返回逻辑实体的实时模型。
+**作用**：返回逻辑实体上**已部署指标**的实时/落地模型，核心是各指标对应的 **SQL 语句**（用于后续实际查数与画图）。
 
 | 项 | 说明 |
 |---|---|
 | 入参 | `id`（string，必填）：逻辑实体 UUID |
-| 出参 | 当前恒为空对象 |
+| 出参 | 已部署指标及相关 SQL / 模型信息（非空；以云上实际返回结构为准） |
 
 要点：
 
-- **暂不可用**（后端返回空），不要调用。保留在此仅作登记。
+- **已可用**：不要再当作空接口跳过。意图需要数值/趋势时，在选定逻辑实体（及目标指标）后调用。
+- 返回的 SQL 是取数依据；**执行 SQL 的数据库通道、权限与限流**由运行环境提供，本 Skill 不内嵌连接串。
+- 先完成定义侧对齐（Stage 5 / 5.7）再取 RealModel，避免对大量无关实体拉 SQL。
+- 解析时按目标指标的中英名/标识与返回项对齐；对不上则说明「定义在、部署 SQL 未找到」，不要编造数值。
 
 ## 典型调用链
 
 ```text
-locateNode(关键词)                    # 定位候选分类节点
+[可选] 本体锚定 → category_ids / locate_keywords / entity&metric 候选
+locateNode(关键词) 或 直接使用本体 category_id
   └─> [Stage 3 剪枝：最小覆盖根 / 最贴合节点]
         └─> getNextLevelNode(分类id, CATEGORY)          # 取逻辑实体（递归覆盖后代）
               └─> getLogicEntityDefineInfo(实体id, parentOperObjId)   # 取指标定义
+                    └─> [Stage 5.7 语义消歧]
+                          └─> (意图 C) getLogicEntityRealModel(实体id) → 执行 SQL → 绘图
 ```

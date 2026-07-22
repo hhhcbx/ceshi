@@ -1,0 +1,73 @@
+# metric-shelf 运行时概念清单（ABox 的可读投影）
+# Agent / Skill 查阅本文件做语义锚定。全量为空模板：由业务治理流程逐步填入。
+# 禁止写入离线评测问句及其标准答案路径。
+
+version: 1
+namespace: urn:aiops:metric-shelf
+
+# 指标意图桶（与 schema.ttl 中 MetricIntent 对齐；可扩展，勿删已有 id）
+metric_intents:
+  - id: intent.success_rate_like
+    label: success_rate_like
+    utterances: ["成功率", "成功占比", "请求成功比例"]
+    disambiguation_hints:
+      - "成功/通过/OK 类结果占比"
+  - id: intent.fill_rate_like
+    label: fill_rate_like
+    utterances: ["填充率", "补给率"]
+    disambiguation_hints:
+      - "供给/填充侧占比"
+  - id: intent.exposure_or_click_rate_like
+    label: exposure_or_click_rate_like
+    utterances: ["曝光率", "点击率", "触达率"]
+    disambiguation_hints:
+      - "曝光/点击/触达类交互占比"
+  - id: intent.count_like
+    label: count_like
+    utterances: ["次数", "总量", "计数"]
+    disambiguation_hints:
+      - "计数或总量"
+  - id: intent.latency_like
+    label: latency_like
+    utterances: ["时延", "耗时", "延迟"]
+    disambiguation_hints:
+      - "时延或耗时"
+
+# 业务概念：请按需追加。以下仅展示字段形状的注释示例（注释掉，不参与匹配）。
+#
+# concepts:
+#   - id: concept.example_domain
+#     status: draft
+#     labels: ["示例域"]
+#     utterances: ["示例说法A", "示例说法B"]
+#     synonyms: []
+#     broader: []
+#     narrower: []
+#     locate_keywords: ["示例"]
+#     category_bindings:
+#       - shelf_category_id: "domain.example"
+#         path_label: "示例路径"
+#         status: draft
+#     logic_entity_bindings:
+#       - shelf_logic_entity_id: "<uuid>"
+#         parent_oper_obj_id: "<parent-id>"
+#         name_cn: "示例逻辑实体"
+#         name_en: "example_logic_entity"
+#         under_category_id: "domain.example"
+#         status: draft
+#     metric_bindings:
+#       - metric_name_cn: "示例指标"
+#         metric_name_en: "example_metric"
+#         logic_entity_id: "<uuid>"
+#         intent_ids: ["intent.success_rate_like"]
+#         disambiguation_hints:
+#           - "定义或 SQL 中体现的口径特征（非评测答案）"
+#         status: draft
+
+concepts: []
+
+# 维护元数据
+meta:
+  note: "Phase A 只交付结构与 Skill 规程；真实业务映射在治理流程中录入。"
+  source_of_truth_for_runtime: concepts.yaml
+  formal_tbox: schema.ttl
