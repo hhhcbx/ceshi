@@ -330,3 +330,32 @@ business_and_platform.ADV.AdvertiserRebate.pps_click
 2. `docs/agent-realmodel-query-rules.md`：指导 Agent 如何基于 `getNextLevelNode` 和 `getLogicEntityRealModel` 做生产问数。
 
 本文作为讨论总结和复盘入口，供后续 Agent 快速理解背景。
+
+---
+
+## 12. 2026-07-24 对齐：locateNode 本体文档改为代码侧弱 Agent 实施说明
+
+本轮用户明确纠正了文档对象和系统边界：
+
+1. Java 侧确实需要修改 `locateNode` 代码和 resources 里的 YAML，使 `locateNode` 融入本体语义层。
+2. “弱 Agent”指的是在 IDEA 中辅助编码的内部弱 Agent，它有权限访问 Java 工程、内部代码和 resources，因此 `docs/locatenode-ontology-mvp.md` 应该演化成写给代码侧弱 Agent / 工程实现者看的实施文档。
+3. “Agent 侧”指的是 databp 部署到云上后，由另一个云端 Agent 调用接口执行问数逻辑。因此 `docs/agent-realmodel-query-rules.md` 才应该演化成给云端 Agent Skill 提供指导的文档。
+4. 之前把“弱 Agent 辅助编码文档”说成可选新增文档，或者把 Java 侧实现与云端 Agent 调用规程写在一起，是错误的逻辑；两份文档必须分工明确。
+5. 用户发现 Java 项目里已经有简要本体/节点数据，位于 `resources/DataModel` 路径下。
+6. `resources/DataModel` 的组织方式是每个节点一个文件夹；如果节点有子节点，就继续嵌套子文件夹；每个节点目录下有一个 `base.yaml`。
+7. `base.yaml` 中已有字段包括 `id`、`parent_category_id`、`name_cn`、`name_en`、`description`，不同节点还可能有 `version`、`owner`、`offering` 等字段。
+8. 这份 resources 节点信息可能与现有真实货架不完全一致。例如「广告点击」真实 ID 是 `business_and_platform.ADV.AdvertiserRebate.pps_click`，但 resources 可能只记录到 `business_and_platform.ADV.AdvertiserRebate`。
+9. 这不代表叶子节点不应该记录，只是当前 resources 信息没有完全更新。MVP 阶段不要因此阻塞，应先跑通流程，节点信息后续再慢慢同步。
+10. 用户建议最好复制一份现有 `resources/DataModel`，然后在副本基础上修改，而不是直接改原始数据。
+11. 从本轮开始，每轮对话都要把记录追加到 `docs/metric-ontology-discussion-summary.md` 后面。要求是追加即可，不压缩内容，不修改原始内容。
+
+基于以上对齐，本轮将 `docs/locatenode-ontology-mvp.md` 改写为代码侧实施方案，重点包括：
+
+1. 明确文档对象是 Java 代码侧弱 Agent，不是云端问数 Agent。
+2. 明确云端 Agent 的 RealModel 查询和问数编排规则属于 `docs/agent-realmodel-query-rules.md`。
+3. 引入已有 `resources/DataModel` 作为输入现状。
+4. 建议复制一份 DataModel 到本体运行时目录，例如 `resources/ontology/metric-shelf/DataModel`。
+5. 建议在副本 `base.yaml` 中保留原字段，并新增 `ontology` 字段块保存 `concept_id`、`aliases`、`confidence`、`tags`、`match_reason`。
+6. 明确广告点击缺失叶子节点可以在副本中先手工补齐，真实 ID 写完整：`business_and_platform.ADV.AdvertiserRebate.pps_click`。
+7. 明确 `locateNode` 只做节点定位：加载本体 DataModel、匹配 keyword、返回候选节点、未命中时走旧树搜索兜底；不查实体、不查 RealModel、不执行 SQL。
+8. 增加 DataModel loader、匹配规则、返回结构、本地测试 checklist、云上部署前检查和常见错误。
