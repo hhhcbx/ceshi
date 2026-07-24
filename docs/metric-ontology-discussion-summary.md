@@ -377,3 +377,23 @@ business_and_platform.ADV.AdvertiserRebate.pps_click
 9. 返回结构也随之简化：尽量沿用旧结构，只建议增加 `parentCategoryId`、`matchType`、`matchedValue` 这类轻量字段，不再新增 `matchedConceptId`、`confidence`、`reason`。
 10. 匹配规则也简化为只匹配 `id/name_cn/name_en/aliases`，不再匹配 `description`，避免描述文本带来噪声。
 11. 仍然保留前一轮已经确认的边界：本文是给 Java 代码侧弱 Agent 的实施文档；云端 Agent 的问数编排规程仍归 `docs/agent-realmodel-query-rules.md`；`locateNode` 不查实体、不查 RealModel、不执行 SQL；旧树搜索兜底不能删除。
+
+---
+
+## 14. 2026-07-24 对齐：Layer 2 Metric Family 应独立于节点 base.yaml
+
+本轮用户提出了 Layer 2 的关键建模问题：如果每个 `base.yaml` 都是货架树上一个节点对应的本体，那么 `aliases`、`id`、`name` 等都可以理解为该节点本体的属性；接下来要添加指标口径本体 / Metric Family 本体时，是否也应该像 Layer 1 一样写在每个节点的 `base.yaml` 后面。
+
+本轮达成的设计判断：
+
+1. 每个节点目录下的 `base.yaml` 可以理解为一个“节点本体文件”，对应货架树上的一个节点。
+2. `id` 是节点稳定标识，`parent_category_id` 是父子关系属性，`name_cn/name_en` 是名称属性，`description` 是描述属性，`aliases` 是 Layer 1 节点别名属性。
+3. Metric Family 不应写进每个节点的 `base.yaml`。原因是成功率、时延、内存使用率等指标族是跨业务节点复用的指标口径概念，不属于单个广告节点、小艺节点或支付节点。
+4. 如果把 Metric Family 写进每个节点 `base.yaml`，会导致同一套成功率规则在多个节点中重复维护，后续规则变更时容易不一致，也会混淆“节点本体”和“指标族本体”。
+5. Layer 2 应新增独立 YAML，例如 `resources/ontology/metric-shelf/metric-families.yaml`，集中维护成功率、时延、内存使用率等通用指标族。
+6. 节点 `base.yaml` 继续回答“用户说的业务对象是什么节点”；`metric-families.yaml` 回答“用户说的指标口径是什么意思，在候选指标列表中如何匹配直接指标、公式候选和相关但不等价候选”。
+7. 广告只是 Layer 2 的测试样例，不是规则边界。`success_rate` 应写成通用指标族，可复用于广告、小艺、搜索、支付、翻译等业务节点。
+8. 本阶段暂不解决真实查数和 SQL 执行，只做本地可测的指标匹配、口径识别、公式候选和消歧输出。
+9. 测试数据可先合理编造，包括广告接口成功率、广告接口最小内存使用率、广告接口平均时延、广告接口成功次数、广告接口最大内存使用率、广告接口请求次数等。
+10. 对问题“最近一个月广告成功率是多少？”，Layer 1 负责定位广告节点，Layer 2 负责识别 `success_rate` 指标族，并在候选指标中优先找到直接指标“广告接口成功率”，同时识别公式候选“广告接口成功次数 / 广告接口请求次数”。用户已明确成功率=成功次数/请求次数，因此测试期可使用公式口径但必须解释。
+11. 本轮新增 `docs/metric-family-ontology-mvp.md`，作为像 `locatenode-ontology-mvp.md` 一样面向弱 Agent 的 Layer 2 构建指导文档。
