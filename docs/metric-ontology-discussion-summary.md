@@ -1,361 +1,279 @@
-# Metric Ontology 讨论结论与复盘
+# 指标本体讨论结论
 
-## 1. 本文目的
+## 1. 文档目的
 
-本文记录本轮关于 PR9、PR10、metric-query skill、本体层、locateNode、gateway、databp 和 RealModel 查询链路的讨论结论。
+本文只保留目前仍然有效的背景、约束和设计结论，作为后续 Java 弱 Agent、云端 Agent 和方案评审的共同上下文。
 
-目的有两个：
+详细实施文档：
 
-1. 让其他 Agent 快速理解当前思路，避免重新争论 gateway、接口新增、本体粒度等问题。
-2. 给项目维护者一个简要复盘，避免后续遗忘关键决策和约束。
+1. `docs/locatenode-ontology-mvp.md`：Java 侧 Phase A。
+2. `docs/metric-family-ontology-mvp.md`：Java 侧 Phase B。
+3. `docs/agent-realmodel-query-rules.md`：云端 Agent 调用规程。
+4. `skills/metric-query/SKILL.md`：现有 Skill；后续按稳定接口规程演进。
 
-## 2. 真实工作模式
+## 2. 项目目标
 
-当前仓库只是中转站，不是真正执行代码和测试的主环境。真实代码最终会写入另一个受限环境，其中有一个能力较弱的 Agent，且外部强 Agent 无法直接操作或测试。
+本体不是数据库，也不替代真实数据接口。它是云端 Agent 和企业系统之间的业务语义层，负责告诉系统：
 
-因此，当前协作模式是：
+1. 用户说的业务对象对应哪个货架节点。
+2. 用户说的指标口径对应哪个已部署指标。
+3. 不同指标、过滤条件、关系和规则之间是什么语义。
+4. 应如何把业务语言转成可执行、可解释的查询计划。
 
-```text
-强 Agent 负责：理解、规划、写方案、写文档、写代码草稿、排错建议。
-用户负责：把文档下载给弱 Agent，或把弱 Agent 的反馈贴回仓库。
-弱 Agent 负责：在真实环境中实际改代码、部署、测试。
-```
-
-当前仓库中有很多与本项目无关的文件。与本项目直接相关的是：
-
-1. PR8 的 metric-query skill。
-2. PR9 的 locateNode 交接思路。
-3. PR10 的本体语义层构想。
-4. `skills/metric-query` 目录。
-
-PR 是否已合并不是关键，仓库主要作为方案和交接材料的暂存地。
-
-## 3. 环境与接口约束
-
-### 3.1 Agent 能直接调用 databp 接口
-
-Agent 当前可以直接调用 databp 中已有的接口，包括：
-
-1. `getModelTree`
-2. `getNextLevelNode`
-3. `getLogicEntityDefineInfo`
-4. `getLogicEntityRealModel`
-5. 已新增的 `locateNode`
-
-### 3.2 新增 databp 对外接口很麻烦
-
-在 databp 中新增一个可被 Agent 调用的接口涉及权限、鉴权、Swagger/MCP 契约、云上部署等问题，成本高、风险大。
-
-`locateNode` 是已经被打通的新增接口，因此后续如需改造，应优先集中在 `locateNode` 上，而不是继续新增多个 databp 对外接口。
-
-### 3.3 gateway 暂不参与真实查询链路
-
-gateway 中新增接口虽然方便，但 gateway 环境无法访问 databp 真实货架数据。因此，gateway 不能作为真实数据查询的中转。
-
-结论：
+长期希望通过本体统一业务口径、减少 Agent 猜测、提高匹配准确度和结果可解释性。实施策略不是先建设完整 OWL 工程，
+而是从可验证的小闭环开始：
 
 ```text
-需要真实货架数据的链路不走 gateway。
-gateway 暂时不用管。
+一组轻量 YAML/资源配置
+  + Java 运行时加载和解析层
+  + 少量稳定语义接口
+  + 云端 Agent 编排
+  + 现有真实数据接口
 ```
 
-## 4. locateNode 的新定位
+## 3. 两类 Agent 的边界
 
-`locateNode` 最初用于解决：
+### 3.1 Java 代码侧弱 Agent
+
+“弱 Agent”是在 IDEA 中辅助开发的内部 Agent。它可以访问 Java 工程和内部 resources，负责：
+
+1. 修改 Java 代码和 YAML。
+2. 建立 loader、entry、matcher、resolver 等运行时能力。
+3. 暴露云端可调用的语义接口。
+4. 编写单元测试和真实接口集成测试。
+
+Java 实施文档只写代码侧职责，不重复云端 Agent 的完整编排逻辑。
+
+### 3.2 云端 Agent
+
+云端 Agent 在服务部署后通过接口完成问数，负责：
+
+1. 意图和槽位抽取。
+2. 按顺序调用节点、实体、语义解析和查数接口。
+3. 根据歧义状态追问用户。
+4. 解析时间范围。
+5. 展示真实结果和解释依据。
+
+云端 Agent 不直接读取 Java YAML，不在 Skill 中复制本体规则，也不构造真实 ID。
+
+## 4. 本体资产的存放原则
+
+所有本体 YAML 统一放在 Java 侧，作为业务语义的唯一来源。统一存放不代表所有概念写进同一个文件：
 
 ```text
-用户只有节点名称或业务词，但 getNextLevelNode 需要分类节点 ID。
+resources/ontology/metric-shelf/
+├── DataModel/
+│   └── 每个节点目录/base.yaml
+├── metric-families.yaml
+├── filter-concepts.yaml          # 后续
+├── relations.yaml                # 后续
+├── query-mappings.yaml           # 后续
+└── rules/                        # 后续
 ```
 
-旧问题：
+按语义作用域拆分的原因：
 
-1. `getModelTree` 返回全量树，数据太大，几乎不可用。
-2. `getNextLevelNode` 需要分类节点 ID。
-3. 用户说 `ads`、`ad`、`推广` 时，原始节点名搜索可能找不到中文节点「广告」。
-4. 货架路径中可能存在多个同名节点，例如两个都叫「广告」的节点。
+1. `base.yaml` 描述单个货架节点。
+2. Metric Family 是成功率、时延、内存使用率等跨节点口径。
+3. 过滤概念、关系、规则和查询映射也可能跨多个节点复用。
+4. 避免在每个节点重复维护相同规则。
+5. 所有文件仍由同一 Java 工程、同一发布流程和同一运行时管理。
 
-新结论：
+## 5. 当前 DataModel 现状
 
-```text
-locateNode 应改造成轻量本体定位接口。
-```
+Java 项目已有 `resources/DataModel`：
 
-它应该：
+1. 每个节点一个目录。
+2. 子节点继续嵌套目录。
+3. 每个节点对应一个 `base.yaml`。
+4. 常见字段包括 `id`、`parent_category_id`、`name_cn`、`name_en`、`description`。
+5. 部分节点还有 `version`、`owner`、`offering` 等字段。
 
-1. 读取 databp resources 中的 `nodeConcepts.yaml`。
-2. 优先用本体配置匹配业务节点、别名和真实 categoryId。
-3. 本体未命中时，再走旧树搜索兜底。
-4. 返回分类节点 ID、路径、命中概念、置信度和原因。
-
-它不应该：
-
-1. 不做完整问数理解。
-2. 不处理任意长对话。
-3. 不调用 `getNextLevelNode`。
-4. 不调用 `getLogicEntityRealModel`。
-5. 不执行 SQL。
-6. 不返回真实指标值。
-
-## 5. 本体层的边界
-
-本体层不应该事无巨细维护所有具体业务指标。否则会变成难以维护的手工知识库或知识图谱。
-
-更合适的边界是：
-
-```text
-本体 = 稳定业务概念 + 货架节点绑定 + 通用指标族 + 通用过滤概念 + 少量业务特例。
-```
-
-第一阶段只强制落地：
-
-```text
-nodeConcepts：业务/货架节点概念。
-```
-
-例如：
-
-```text
-广告
-广告点击
-小艺
-翻译
-支付
-搜索
-```
-
-这些用于解决：
-
-```text
-用户词 / 英文别名 / 口语表达 -> 真实货架 categoryId
-```
-
-## 6. 具体指标不应全部写进本体
-
-以下指标不应全部逐条写入本体：
-
-```text
-广告点击率
-广告曝光率
-广告时延
-广告内存使用率
-广告成功率
-广告请求次数
-广告失败次数
-```
-
-更合理的方式是分层：
-
-### 6.1 指标族 Metric Family
-
-维护通用指标族，例如：
-
-```text
-成功率
-曝光率
-点击率
-时延
-内存使用率
-CPU 使用率
-请求次数
-失败次数
-错误率
-```
-
-这些用于指导 Agent 在 RealModel 已部署指标中匹配候选。
-
-### 6.2 过滤概念 Filter Concept
-
-维护通用筛选条件，例如：
-
-```text
-黄金 -> level=GOLD
-健康 -> level=HEALTH
-普通 -> level=NORMAL
-端侧打点 -> collectSide/sourceType/tags 中的端侧相关值
-```
-
-这些是过滤规则，不是具体业务指标本体。
-
-### 6.3 少量业务特例 Metric Exception
-
-只有高频、高风险、特别容易歧义的指标才写特例。
-
-例如「广告成功率」可以作为代表性特例，因为它可能对应：
-
-1. 直接指标：广告成功率。
-2. 公式候选：广告接口成功次数 / 广告接口请求次数。
-3. 相关但不同：广告曝光率。
-
-但这不是所有具体指标的维护模式。
-
-## 7. Agent 和 locateNode 的分工
-
-### 7.1 Agent 负责槽位抽取
-
-Agent 应先从用户问题中抽取：
-
-```yaml
-business_object: 用于定位货架节点的业务对象
-metric_phrase: 用户想查的指标短语
-filters: 指标或数据筛选条件
-time_range: 时间范围
-query_mode: definition | value | trend | comparison
-```
-
-例如：
-
-```text
-最近一个月的指标等级是黄金的广告成功率是多少？
-```
-
-抽取：
-
-```yaml
-business_object: 广告
-metric_phrase: 广告成功率
-filters:
-  - level = GOLD
-time_range: 最近一个月
-query_mode: value
-```
-
-### 7.2 locateNode 负责节点定位
-
-Agent 调用：
-
-```text
-locateNode("广告")
-```
-
-不要默认把长篇用户输入原样丢给 `locateNode`。
-
-### 7.3 Agent 负责后续编排
-
-拿到分类节点 ID 后，Agent 继续：
-
-```text
-getNextLevelNode(categoryId, CATEGORY)
-  ↓
-getLogicEntityRealModel(logicEntityId)
-  ↓
-匹配已部署指标
-  ↓
-应用过滤和时间条件
-  ↓
-必要时消歧
-```
-
-## 8. RealModel 是生产查数依据
-
-关键纠正：
-
-```text
-getLogicEntityDefineInfo 返回未部署指标，数据库中找不到。
-getLogicEntityRealModel 返回已部署指标，是生产查数依据。
-```
-
-因此，生产链路应直接使用：
-
-```text
-getNextLevelNode
-  ↓
-getLogicEntityRealModel
-```
-
-`getLogicEntityDefineInfo` 只用于测试、对照、排查，不用于生产查数。
-
-## 9. 广告成功率场景复盘
-
-货架链路：
-
-```text
-业务平台 > 广告 > 广告 > 广告点击
-```
-
-真实分类 ID 示例：
+resources 快照可能落后于真实货架。例如广告点击真实 ID 为：
 
 ```text
 business_and_platform.ADV.AdvertiserRebate.pps_click
 ```
 
-该节点下有逻辑实体「广告测试」。RealModel 中可能有：
+但旧资源可能只记录到父节点。MVP 不因此阻塞：先复制现有 DataModel 到本体资源目录，在副本上补 aliases 和已确认节点；
+真实 ID 不确定时禁止编造，后续逐步同步。
 
-1. 广告成功率
-2. 广告接口成功次数
-3. 广告接口请求次数
-4. 广告曝光率
+## 6. Phase A：aliases-only locateNode
 
-用户问：
+### 6.1 目标
 
 ```text
-最近一个月的广告成功率是多少？
+用户业务对象说法 -> 真实货架分类节点
 ```
 
-推荐流程：
+当前本体收益集中在 `aliases`：列出同义词、英文、缩写和口语表达，提高节点定位准确率。
+
+节点已有 `id/name_cn/name_en`，因此 Phase A 不额外维护 `concept_id`。点分 ID 已编码层级，
+因此不手工维护另一份 `path`。
+
+广告示例：
+
+```yaml
+id: business_and_platform.ADV
+name_cn: 广告
+name_en: Advertising
+aliases:
+  - 广告
+  - ads
+  - ad
+  - 推广
+  - 推广业务
+```
+
+### 6.2 Java 实现现状和边界
+
+Phase A 已有 `load` 包、`OntologyLoader` 和用于读取 `base.yaml` 的 `LocateNodeEntry`。
+这套 loader + entry + 内存查询结构已经承担节点本体加载职责，不要求为了抽象概念而重命名。
+
+`locateNode`：
+
+1. 读取节点本体副本。
+2. 匹配 `id/name_cn/name_en/aliases`。
+3. 返回分类候选和匹配依据。
+4. 未命中时保留旧树搜索兜底。
+5. 不获取逻辑实体，不读取 RealModel，不查数。
+
+## 7. Phase B：Metric Family
+
+### 7.1 目标
 
 ```text
-1. Agent 抽取 business_object=广告，metric_phrase=广告成功率，time_range=最近一个月。
-2. Agent 调 locateNode("广告")。
-3. locateNode 基于 nodeConcepts.yaml 返回广告相关分类节点。
-4. Agent 选择或追问确认广告点击节点。
-5. Agent 调 getNextLevelNode。
-6. Agent 对逻辑实体调用 getLogicEntityRealModel。
-7. Agent 优先匹配 RealModel 中的直接指标「广告成功率」。
-8. 如果没有直接指标，再考虑「广告接口成功次数 / 广告接口请求次数」公式候选。
-9. 「广告曝光率」只是相关但不同，不能默认作为成功率。
-10. Agent 应用最近一个月时间条件。
-11. 查询并返回结果。
+logicEntityId + 用户指标短语
+  -> Metric Family
+  -> 真实 RealModel 指标
+  -> 真实 metricId / 歧义 / 公式候选 / 未找到
 ```
 
-## 10. 已确认的设计决策
+Metric Family 统一放在 Java `metric-families.yaml`，不放进各节点 `base.yaml`，也不复制到云端 Skill。
 
-1. gateway 暂时不用管。
-2. 不新增多个 databp 对外接口。
-3. 改造已打通的 `locateNode`。
-4. 不给 `locateNode` 增加 mode，默认就是新逻辑。
-5. `locateNode` 不做一站式问数。
-6. Agent 调用 `locateNode` 前应尽量先抽取短定位词。
-7. 本体第一阶段只强制维护节点概念和真实 categoryId 映射。
-8. 不穷举所有具体指标。
-9. 指标匹配以 RealModel 已部署指标为准。
-10. `getLogicEntityDefineInfo` 只测试，不作为生产查数依据。
-11. 本体找不到时，Agent 语义增强只能作为兜底，不是主流程。
-12. 多个高置信候选时必须追问。
+第一版覆盖当前真实数据可验证的：
 
-## 11. 后续文档
+1. `success_rate`。
+2. `latency.avg_latency`。
+3. `memory_usage_rate.min/max`。
 
-本次沉淀出两份执行文档：
+### 7.2 Java 运行方式
 
-1. `docs/locatenode-ontology-mvp.md`：指导弱 Agent 改造 `locateNode` 和 `nodeConcepts.yaml`。
-2. `docs/agent-realmodel-query-rules.md`：指导 Agent 如何基于 `getNextLevelNode` 和 `getLogicEntityRealModel` 做生产问数。
+Phase B 沿用 Phase A 的实现思路：
 
-本文作为讨论总结和复盘入口，供后续 Agent 快速理解背景。
+1. entry 表达 YAML 结构。
+2. loader 在启动时加载并校验资源。
+3. matcher 识别 family/variant 并匹配真实指标。
+4. resolver 编排 RealModel 获取和匹配结果。
+5. Controller 只提供薄接口层。
 
----
+可扩展现有 `OntologyLoader`，也可在其职责仅限节点时新增 `MetricFamilyLoader`。名字不是关键；关键是配置只有一份、
+加载逻辑清楚、索引只读、错误可见。暂不为了统一抽象回头重构稳定的 Phase A。
 
-## 12. 2026-07-24 对齐：locateNode 本体文档改为代码侧弱 Agent 实施说明
+### 7.3 `resolveMetric` 接口
 
-本轮用户明确纠正了文档对象和系统边界：
+因为云端 Agent 无法直接访问 Java 内部 matcher，Phase B 必须暴露对外接口：
 
-1. Java 侧确实需要修改 `locateNode` 代码和 resources 里的 YAML，使 `locateNode` 融入本体语义层。
-2. “弱 Agent”指的是在 IDEA 中辅助编码的内部弱 Agent，它有权限访问 Java 工程、内部代码和 resources，因此 `docs/locatenode-ontology-mvp.md` 应该演化成写给代码侧弱 Agent / 工程实现者看的实施文档。
-3. “Agent 侧”指的是 databp 部署到云上后，由另一个云端 Agent 调用接口执行问数逻辑。因此 `docs/agent-realmodel-query-rules.md` 才应该演化成给云端 Agent Skill 提供指导的文档。
-4. 之前把“弱 Agent 辅助编码文档”说成可选新增文档，或者把 Java 侧实现与云端 Agent 调用规程写在一起，是错误的逻辑；两份文档必须分工明确。
-5. 用户发现 Java 项目里已经有简要本体/节点数据，位于 `resources/DataModel` 路径下。
-6. `resources/DataModel` 的组织方式是每个节点一个文件夹；如果节点有子节点，就继续嵌套子文件夹；每个节点目录下有一个 `base.yaml`。
-7. `base.yaml` 中已有字段包括 `id`、`parent_category_id`、`name_cn`、`name_en`、`description`，不同节点还可能有 `version`、`owner`、`offering` 等字段。
-8. 这份 resources 节点信息可能与现有真实货架不完全一致。例如「广告点击」真实 ID 是 `business_and_platform.ADV.AdvertiserRebate.pps_click`，但 resources 可能只记录到 `business_and_platform.ADV.AdvertiserRebate`。
-9. 这不代表叶子节点不应该记录，只是当前 resources 信息没有完全更新。MVP 阶段不要因此阻塞，应先跑通流程，节点信息后续再慢慢同步。
-10. 用户建议最好复制一份现有 `resources/DataModel`，然后在副本基础上修改，而不是直接改原始数据。
-11. 从本轮开始，每轮对话都要把记录追加到 `docs/metric-ontology-discussion-summary.md` 后面。要求是追加即可，不压缩内容，不修改原始内容。
+```text
+resolveMetric(logicEntityId, metricPhrase)
+```
 
-基于以上对齐，本轮将 `docs/locatenode-ontology-mvp.md` 改写为代码侧实施方案，重点包括：
+接口内部：
 
-1. 明确文档对象是 Java 代码侧弱 Agent，不是云端问数 Agent。
-2. 明确云端 Agent 的 RealModel 查询和问数编排规则属于 `docs/agent-realmodel-query-rules.md`。
-3. 引入已有 `resources/DataModel` 作为输入现状。
-4. 建议复制一份 DataModel 到本体运行时目录，例如 `resources/ontology/metric-shelf/DataModel`。
-5. 建议在副本 `base.yaml` 中保留原字段，并新增 `ontology` 字段块保存 `concept_id`、`aliases`、`confidence`、`tags`、`match_reason`。
-6. 明确广告点击缺失叶子节点可以在副本中先手工补齐，真实 ID 写完整：`business_and_platform.ADV.AdvertiserRebate.pps_click`。
-7. 明确 `locateNode` 只做节点定位：加载本体 DataModel、匹配 keyword、返回候选节点、未命中时走旧树搜索兜底；不查实体、不查 RealModel、不执行 SQL。
-8. 增加 DataModel loader、匹配规则、返回结构、本地测试 checklist、云上部署前检查和常见错误。
+1. 根据 `logicEntityId` 使用已有内部 service/repository 获取真实 RealModel。
+2. 根据 `metricPhrase` 命中 Metric Family。
+3. 在已部署指标中选择直接候选或公式候选。
+4. 返回真实指标 ID 和匹配依据。
+
+云端 Agent 不先下载巨大 RealModel 再传回 `resolveMetric`。`getLogicEntityRealModel` 保留给指标目录浏览和排查。
+
+## 8. 当前真实数据和展示场景
+
+广告节点下已有逻辑数据实体“广告测试实体”，包含：
+
+1. 广告接口成功率。
+2. 广告接口最小内存使用率。
+3. 广告接口平均时延。
+4. 广告接口成功次数。
+5. 广告接口最大内存使用率。
+6. 广告接口请求次数。
+
+真实查数接口为：
+
+```text
+queryIndicatorDimensionData(metricId, startTime, endTime)
+```
+
+主演示问题：
+
+```text
+最近一个月推广业务的成功占比是多少？
+```
+
+它同时验证：
+
+1. Phase A：`推广业务` 通过广告节点 alias 命中。
+2. 实体获取：找到“广告测试实体”。
+3. Phase B：`成功占比` 命中 `success_rate`。
+4. 指标匹配：选择直接指标“广告接口成功率”，而不是成功次数或请求次数。
+5. 真实查数：使用 `resolveMetric` 返回的真实指标 ID 和明确起止时间查询。
+
+不再维护生产用本地假指标 YAML。单元测试可以 mock RealModel service，结构应与真实返回一致；最终必须通过真实广告实体集成验收。
+
+## 9. 云端标准调用链
+
+```text
+用户问题
+  -> Agent 抽取 businessObject / metricPhrase / timeRange
+  -> locateNode(businessObject)                    # Phase A
+  -> getNextLevelNode(categoryId, CATEGORY)        # 获取真实逻辑实体
+  -> resolveMetric(logicEntityId, metricPhrase)    # Phase B
+  -> 必要时根据候选追问
+  -> queryIndicatorDimensionData(metricId, startTime, endTime)
+  -> 展示真实结果和依据
+```
+
+云端 Agent 维护调用编排、追问、时间和展示；Java 维护 aliases、Metric Family、真实匹配和后续本体规则。
+
+## 10. 接口策略
+
+新增接口有成本，但本体 Java 运行时必须有接口才能被云端 Agent 使用。
+
+当前采用清晰的小闭环：
+
+1. 保留已有 `locateNode` 承担 Phase A。
+2. 新增职责单一的 `resolveMetric` 承担 Phase B。
+3. 复用已有 `getNextLevelNode` 和 `queryIndicatorDimensionData`。
+4. 标准问数链路不要求 Agent 拉取完整 RealModel。
+
+后续本体能力增加时，不按每个 YAML 文件机械新增接口。优先考虑一个组合式语义解析接口返回节点、指标、过滤、关系、
+规则依据和查询计划；如果某类能力输入输出、性能或安全边界明显不同，可以独立拆分。
+
+核心原则：内部可以有多个 loader/resolver，对外接口按稳定业务职责收敛；不能为了接口数量少制造不可测试的万能接口。
+
+## 11. 后续本体方向
+
+后续希望逐步增加：
+
+1. 过滤概念：黄金、健康、基础、复合、端侧等自然语言到规范条件的映射。
+2. 关系语义：声明哪些节点、实体或指标之间存在依赖、归属和可传递关系。
+3. 业务规则：将稳定口径和判断条件从 Agent 提示词收敛到 Java 本体资源。
+4. 查询映射：把业务概念映射到真实数据实体、字段、维度和查询能力。
+5. 语义查询计划：将多个本体模块组合成可执行、可解释的计划。
+6. 本体治理：版本、校验、冲突检测、刷新、审计和解释。
+
+这些能力仍遵循：YAML 在 Java 侧、Java 运行时执行、接口向云端暴露、云端 Agent 负责编排和交互。
+具体阶段的字段和接口等有真实需求后再设计，当前不阻塞 Phase B。
+
+## 12. 关键禁止事项
+
+1. 不把本体当数据库或真实指标快照。
+2. 不在多个节点 `base.yaml` 重复 Metric Family。
+3. 不在 Java YAML 和云端 Skill 各维护一份业务规则。
+4. 不写死真实指标 ID。
+5. 不把 `getLogicEntityDefineInfo` 的未部署指标用于生产查数。
+6. 不让云端 Agent 构造 ID、执行 SQL 或自行实现另一套指标 matcher。
+7. 不把成功率、成功次数、请求次数混为同一指标。
+8. 不把平均、最小、最大、P95/P99 等不同口径互相替代。
+9. 不在歧义时静默猜测。
+10. 不使用假数据掩盖真实接口空结果或错误。

@@ -1,289 +1,339 @@
-# Agent 基于 RealModel 的指标问数规程
+# 云端 Agent 本体增强问数规程
 
-## 1. 目标
+## 1. 文档定位
 
-本文规定 Agent 在拿到货架分类节点后，如何使用 databp 已有接口查询真实已部署指标，并完成指标匹配、筛选、消歧和查数。
+本文讲清楚 **云端 Agent 的执行逻辑和系统边界**，供方案评审、Skill 编写和云端 Agent 运行时参考。
 
-核心原则：
+本文不指导 Java 代码实现。Java 侧的 Phase A 实现见 `docs/locatenode-ontology-mvp.md`，
+Phase B 实现见 `docs/metric-family-ontology-mvp.md`。
 
-1. 生产查数以 `getLogicEntityRealModel` 返回的已部署指标为准。
-2. `getLogicEntityDefineInfo` 只用于测试、对照或排查，不作为生产查数依据。
-3. 本体层主要解决业务对象到货架分类节点的定位问题。
-4. 指标匹配、过滤条件、时间条件由 Agent 基于 RealModel 结果处理。
-5. 多个高置信候选时必须追问，不要静默猜。
-
-## 2. 总体链路
+当前目标是完成一条真实数据闭环：
 
 ```text
 用户问题
-  ↓
-Agent 抽取槽位
-  ↓
-locateNode(业务/对象定位短语)
-  ↓
-getNextLevelNode(categoryId, CATEGORY)
-  ↓
-getLogicEntityRealModel(logicEntityId)
-  ↓
-在已部署指标中匹配 metric_phrase
-  ↓
-应用 filters/time_range
-  ↓
-必要时消歧
-  ↓
-查 SQL / 返回结果
+  -> Phase A：定位业务节点
+  -> 获取逻辑实体
+  -> Phase B：解析指标口径并取得真实指标 ID
+  -> 按指标 ID 和时间范围查询真实数据
+  -> 展示结果
 ```
 
-## 3. 槽位抽取
+## 2. 系统分工
 
-Agent 先从用户问题抽取以下槽位：
+### 2.1 Java 本体语义层维护什么
+
+Java 侧是本体资产和本体执行逻辑的唯一来源，维护：
+
+1. 节点 `base.yaml`，包括 `id/name_cn/name_en/aliases` 等节点属性。
+2. `metric-families.yaml`，包括指标族 aliases、变体、直接指标匹配规则和公式关系。
+3. 本体 YAML 的加载、校验、版本和运行时索引。
+4. Phase A 的节点匹配逻辑。
+5. Phase B 的指标族识别、真实指标匹配和候选消歧逻辑。
+6. 后续新增的关系、规则、过滤概念和查询映射等本体资产。
+
+### 2.2 云端 Agent 维护什么
+
+云端 Agent 维护：
+
+1. 识别用户是在查定义、查数值、查趋势、做比较，还是浏览结构。
+2. 从问题中抽取业务对象、指标短语、时间范围和筛选条件。
+3. 按本文规定的顺序调用接口。
+4. 根据接口返回的 `RESOLVED/AMBIGUOUS/NOT_FOUND` 等状态继续执行或追问。
+5. 将相对时间转换成现有查数接口要求的明确起止时间。
+6. 调用真实数据查询接口。
+7. 展示命中对象、指标口径、实际时间范围和真实结果。
+
+### 2.3 云端 Agent 不维护什么
+
+云端 Agent 和 Skill 不应复制或硬编码：
+
+1. 节点 aliases。
+2. Metric Family aliases、公式和变体。
+3. Java resources 中的业务规则和关系。
+4. 真实分类 ID、逻辑实体 ID 或指标 ID。
+5. RealModel 内部结构和 SQL。
+
+Skill 可以说明接口调用方式和状态处理，但不能成为第二份业务本体。否则 Java YAML 与 Skill 规则会发生漂移。
+
+## 3. 当前接口与语义阶段
+
+| 能力 | 接口 | 当前职责 |
+|---|---|---|
+| Phase A | `locateNode(keyword)` | 使用 Java 节点本体把业务说法解析为分类候选 |
+| 获取逻辑实体 | `getNextLevelNode(categoryId, CATEGORY)` | 返回分类及其后代下的真实逻辑实体 |
+| Phase B | `resolveMetric(logicEntityId, metricPhrase)` | 使用 Java Metric Family 和真实 RealModel 解析目标指标 |
+| 查询数据 | `queryIndicatorDimensionData(metricId, startTime, endTime)` | 按真实指标 ID 和明确时间范围查数 |
+| 指标目录/排查 | `getLogicEntityRealModel(logicEntityId)` | 浏览或排查已部署指标；不是标准问数链路中的匹配执行者 |
+
+`resolveMetric` 是 Phase B 需要新增的对外语义接口。接口内部自行读取该逻辑实体的真实 RealModel，
+云端 Agent 不需要先取得巨大的 RealModel，再把它传回 Phase B。
+
+## 4. 标准问数流程
+
+### 4.1 槽位抽取
+
+云端 Agent 先抽取：
 
 ```yaml
-business_object: 用于定位货架节点的业务对象
-metric_phrase: 用户想查的指标短语
-filters: 指标或数据筛选条件
-time_range: 时间范围
-query_mode: definition | value | trend | comparison
+business_object: 用户描述的业务对象
+metric_phrase: 用户描述的指标口径
+filters: 可选筛选条件
+time_range: 用户原始时间表达
+query_mode: value | trend | comparison | definition
 ```
 
-示例：
+示例问题：
 
 ```text
-用户问题：最近一个月的指标等级是黄金的广告成功率是多少？
+最近一个月推广业务的成功占比是多少？
 ```
 
-抽取：
+抽取结果：
 
 ```yaml
-business_object: 广告
-metric_phrase: 广告成功率
-filters:
-  - field: level
-    operator: =
-    value: GOLD
-time_range:
-  text: 最近一个月
-  type: ROLLING_LAST_MONTH
+business_object: 推广业务
+metric_phrase: 成功占比
+filters: []
+time_range: 最近一个月
 query_mode: value
 ```
 
-## 4. 节点定位
+不要在调用 Phase A 前擅自把“推广业务”改写成“广告”，否则无法验证 Java 节点 aliases 是否生效。
 
-Agent 使用 `business_object` 调用 `locateNode`：
+### 4.2 Phase A：定位分类节点
+
+调用：
 
 ```text
-locateNode("广告")
+locateNode("推广业务")
 ```
 
-如果返回多个候选：
+处理规则：
 
-1. 优先选择与用户业务对象最具体、最贴合的节点。
-2. 如果用户指标短语能帮助判断，可以结合指标短语选择，例如「广告成功率」可能比广告大类更接近广告点击链路。
-3. 如果仍有多个高置信候选，必须追问用户。
+1. 只把点分 ID 的分类节点用于后续导航。
+2. 广义查询保留能够覆盖目标范围的最小根节点，避免同时查询祖先和后代。
+3. 具体查询选择最贴合的具体节点，不额外扩大到父级。
+4. 多个候选无法可靠选择时向用户确认。
+5. 未命中时可以建议用户换一种说法；不要自行编造分类 ID。
 
-不要把长篇用户输入原样传给 `locateNode`，除非槽位抽取失败。
+### 4.3 获取逻辑实体
 
-## 5. 获取逻辑实体
-
-对选中的分类节点调用：
+对确定的分类调用一次：
 
 ```text
-getNextLevelNode(categoryId, CATEGORY)
+getNextLevelNode(categoryId, "CATEGORY")
+```
+
+`getNextLevelNode` 会递归返回该分类及后代分类中的逻辑实体，因此不能再对其后代重复调用。
+
+处理规则：
+
+1. 使用接口返回的真实逻辑实体 ID。
+2. 按实体名称和用户目标收敛候选。
+3. 当前广告展示场景应找到“广告测试实体”。
+4. 多个实体同样相关时，列出候选并让用户确认；不要批量调用所有实体。
+
+### 4.4 Phase B：解析指标
+
+对选中的逻辑实体调用：
+
+```text
+resolveMetric(logicEntityId, "成功占比")
+```
+
+云端 Agent 不自行实现 Metric Family 匹配，只处理接口状态。
+
+#### 唯一解析成功
+
+```json
+{
+  "status": "RESOLVED",
+  "family": {
+    "id": "success_rate",
+    "nameCn": "成功率"
+  },
+  "selectedMetric": {
+    "id": "<真实指标ID>",
+    "nameCn": "广告接口成功率",
+    "nameEn": "<真实英文名>"
+  },
+  "matchType": "DIRECT_METRIC",
+  "matchedAlias": "成功占比",
+  "requiresConfirmation": false
+}
+```
+
+Agent 保存 `selectedMetric.id`，进入查数。
+
+#### 多个高置信候选
+
+```json
+{
+  "status": "AMBIGUOUS",
+  "candidates": [
+    {"id": "...", "nameCn": "...", "reason": "..."},
+    {"id": "...", "nameCn": "...", "reason": "..."}
+  ],
+  "requiresConfirmation": true
+}
+```
+
+Agent 按接口顺序列出候选并追问，不能静默选择。
+
+#### 只有公式候选
+
+```json
+{
+  "status": "FORMULA_CANDIDATE",
+  "family": {"id": "success_rate", "nameCn": "成功率"},
+  "formula": {
+    "expression": "numerator / denominator",
+    "numerator": {"id": "...", "nameCn": "广告接口成功次数"},
+    "denominator": {"id": "...", "nameCn": "广告接口请求次数"}
+  },
+  "requiresConfirmation": true
+}
+```
+
+Agent 先说明推导口径并取得用户确认。公式执行还必须保证分子、分母的数据时间粒度和维度能够对齐；
+在 Java 接口未返回可安全执行的公式计划前，Agent 不得自行查询两个不明口径的结果后直接相除。
+
+#### 未找到
+
+```json
+{
+  "status": "NOT_FOUND",
+  "message": "未在该逻辑实体的已部署指标中找到 P95 时延"
+}
+```
+
+Agent 如实说明，不得用平均时延等近似指标替代。
+
+### 4.5 解析时间范围
+
+Phase B 成功后，Agent 把用户时间转换成 `queryIndicatorDimensionData` 的真实参数格式。
+
+规则：
+
+1. “最近一个月”是截止当前时刻的滚动一个月。
+2. “上个月”是上一个自然月，与“最近一个月”不同。
+3. 必须使用工具实际要求的格式和时区。
+4. 用户没有提供时间且接口要求必填时，应先追问或明确提出默认范围，不能静默假设。
+5. 最终回答必须回显实际起止时间和时区。
+
+### 4.6 查询真实数据
+
+调用：
+
+```text
+queryIndicatorDimensionData(
+  selectedMetric.id,
+  startTime,
+  endTime
+)
 ```
 
 注意：
 
-1. `getNextLevelNode` 会返回该分类及后代分类下的逻辑实体。
-2. 如果节点过高，返回实体可能很多，Agent 应优先筛选与业务对象相关的逻辑实体。
-3. 后续调用 RealModel 时使用逻辑实体的真实 `id`。
+1. `id` 是 `resolveMetric.selectedMetric.id`，不是分类 ID 或逻辑实体 ID。
+2. 不自行构造或缓存跨环境复用的指标 ID。
+3. 接口返回单值就展示单值，返回时间序列就展示趋势。
+4. 返回空时说明该时间范围内无数据，不能补零或使用假数据。
+5. 不改变接口返回的聚合语义。
 
-## 6. 获取已部署指标
+## 5. 广告真实数据展示
 
-对候选逻辑实体调用：
-
-```text
-getLogicEntityRealModel(logicEntityId)
-```
-
-只使用 RealModel 中已部署的指标和 SQL 做生产查询。
-
-`getLogicEntityDefineInfo` 的定位：
+当前真实数据：
 
 ```text
-仅用于测试、对照、排查未部署指标，不用于生产查数。
+广告节点
+  -> 广告测试实体
+     -> 广告接口成功率
+     -> 广告接口最小内存使用率
+     -> 广告接口平均时延
+     -> 广告接口成功次数
+     -> 广告接口最大内存使用率
+     -> 广告接口请求次数
 ```
 
-## 7. 指标匹配规则
-
-### 7.1 基础优先级
-
-给定用户指标短语 `metric_phrase`，在 RealModel 指标列表中按以下顺序匹配：
-
-1. `nameCn` 完全等于 `metric_phrase`。
-2. `nameEn` 完全等于英文或编码化后的 `metric_phrase`。
-3. `nameCn` 包含完整 `metric_phrase`。
-4. `metric_phrase` 包含 RealModel 指标中文名。
-5. 按指标族规则匹配。
-
-### 7.2 成功率规则
-
-用户说「成功率」时：
-
-1. 优先找直接指标：名称包含「成功率」或 `success_rate`。
-2. 如果没有直接成功率，查找公式候选：
-   - 分子：名称包含「成功次数」「成功量」「success_count」。
-   - 分母：名称包含「请求次数」「请求量」「request_count」。
-3. 「曝光率」「点击率」虽然也是 rate，但不能默认等同成功率。
-4. 如果只有公式候选，默认追问用户是否按该口径计算，除非业务规则明确允许自动计算。
-
-### 7.3 曝光率规则
-
-用户说「曝光率」时：
-
-1. 优先找名称包含「曝光率」或 `exposure_rate` 的指标。
-2. 不要自动替换为成功率、点击率。
-3. 如只有曝光次数和总请求次数，应说明这是推导口径并请求确认。
-
-### 7.4 点击率规则
-
-用户说「点击率」时：
-
-1. 优先找名称包含「点击率」或 `click_rate` / `ctr` 的指标。
-2. 如只有点击次数和曝光次数，可作为公式候选。
-3. 不要自动替换为广告成功率。
-
-### 7.5 时延规则
-
-用户说「时延」「延迟」「latency」「rt」时：
-
-1. 优先找名称包含「时延」「延迟」「耗时」「latency」「rt」的指标。
-2. 如果用户指定 P95/P99/平均值，必须匹配对应分位或聚合口径。
-3. P95、P99、平均时延不能互相默认替换。
-
-### 7.6 内存使用率规则
-
-用户说「内存使用率」「内存占用」「memory usage」时：
-
-1. 优先找名称包含「内存」「memory」「mem」的指标。
-2. 如果同时存在使用量和使用率，按用户短语区分：
-   - 使用率：ratio/rate/percent。
-   - 使用量：bytes/MB/GB/count。
-
-## 8. 过滤条件规则
-
-### 8.1 指标等级
-
-| 用户说法 | 过滤条件 |
-|---|---|
-| 黄金、黄金指标、gold | `level = GOLD` |
-| 健康、健康指标、health | `level = HEALTH` |
-| 普通、普通指标、normal | `level = NORMAL` |
-
-如果 RealModel 指标中没有 `level` 字段，Agent 应说明无法可靠按等级过滤。
-
-### 8.2 指标类型
-
-| 用户说法 | 过滤条件 |
-|---|---|
-| 基础指标、原子指标、basic | `type = BASIC` |
-| 衍生指标、派生指标、derived | `type = DERIVED` |
-| 复合指标、组合指标、composite | `type = COMPOSITE` |
-
-如果 RealModel 中没有 `type` 字段，Agent 应说明无法可靠按类型过滤。
-
-### 8.3 端侧打点
-
-用户说「端侧」「端侧打点」「客户端打点」「client side」时，尝试在 RealModel 指标元数据中查找：
+主演示问题：
 
 ```text
-collectSide
-sourceType
-dataSource
-tags
-nameCn/nameEn
+最近一个月推广业务的成功占比是多少？
 ```
 
-候选值包括：
+预期调用轨迹：
 
 ```text
-CLIENT
-client
-端侧
-客户端
-device_side
+1. locateNode("推广业务")
+   -> Phase A 通过广告节点 alias 命中分类。
+2. getNextLevelNode(categoryId, "CATEGORY")
+   -> 找到“广告测试实体”。
+3. resolveMetric(logicEntityId, "成功占比")
+   -> Phase B 命中 success_rate。
+   -> 从真实 RealModel 中选择“广告接口成功率”。
+   -> 返回真实 metricId。
+4. queryIndicatorDimensionData(metricId, startTime, endTime)
+   -> 返回最近一个月的真实数据。
+5. Agent 展示指标、口径、实际时间范围和结果。
 ```
 
-如果 RealModel 没有可判断字段，不要猜，应明确说明无法可靠筛选端侧打点口径。
-
-## 9. 时间条件规则
-
-常见时间表达式：
-
-| 用户说法 | 解释 |
-|---|---|
-| 最近一个月、近一个月、过去一个月 | 滚动最近 1 个月 |
-| 最近 7 天、近 7 天 | 滚动最近 7 天 |
-| 昨天 | 前一自然日 |
-| 上个月 | 上一个自然月 |
-
-回答或查询时必须写清楚实际时间范围。
-
-如果无法确认 SQL 的时间字段，不要强行注入时间条件，应返回：
+推荐最终回答结构：
 
 ```text
-找到了指标 SQL，但无法确认时间字段，不能安全筛选时间范围。
+命中对象：广告 > 广告测试实体
+指标：广告接口成功率
+语义口径：“成功占比”通过 success_rate 指标族解析
+查询范围：<startTime> 至 <endTime>（<timezone>）
+结果：<真实接口返回摘要>
+口径说明：使用已部署的直接成功率指标，未用成功次数/请求次数重新计算。
 ```
 
-## 10. 消歧规则
+## 6. 定义查询和排查流程
 
-必须追问的情况：
+当用户只是问“广告测试实体有哪些指标”时，可以调用 `getLogicEntityRealModel` 获取精简指标目录，
+不需要调用 `resolveMetric` 和查数接口。
 
-1. 多个逻辑实体都包含同名或高相似指标。
-2. 多个指标都与用户短语高置信匹配。
-3. 只有公式候选但没有直接指标，且业务未允许自动计算。
-4. 用户限定条件无法映射到 RealModel 元数据。
-5. 用户同时提出多个目标但没有说明聚合或对比方式。
+`getLogicEntityRealModel` 还可用于：
 
-追问格式建议：
+1. 排查为什么 `resolveMetric` 未命中。
+2. 展示已部署指标目录。
+3. 对照某个指标的名称、描述、单位、类型或等级。
+
+由于 RealModel 原始数据量大，Swagger 应只向 Agent 暴露排查所需字段。Swagger 投影只负责控量，
+不承担 Phase B；真正的 Phase B 在 Java `resolveMetric` 内执行。
+
+## 7. 后续本体能力如何接入
+
+后续关系、规则、过滤概念和查询映射等本体能力仍由 Java YAML 和 Java 运行时维护。
+云端 Agent 不读取这些 YAML，而是调用 Java 暴露的语义接口取得解析结果或执行计划。
+
+为了避免每增加一种 YAML 就增加一个接口，后续可以新增一个组合式语义解析接口，例如：
 
 ```text
-我找到了多个可能的「广告成功率」口径：
-1. 广告成功率：已部署直接指标，位于广告测试实体。
-2. 广告接口成功次数 / 广告接口请求次数：可推导成功率。
-3. 广告曝光率：相关但含义不同，不能默认作为成功率。
-
-请确认要查询哪一个口径？
+resolveSemanticQuery(structuredIntent)
 ```
 
-## 11. 广告成功率完整示例
+它可以返回节点、实体、指标、过滤条件、关系、规则依据和查询计划。当前 `resolveMetric` 保持职责单一，
+先完成 Phase B；是否升级或被组合接口复用，由后续阶段的真实需求决定。
 
-用户问题：
+接口划分原则：
 
-```text
-最近一个月的指标等级是黄金的广告成功率是多少？
-```
+1. 不按每个 YAML 文件暴露一个接口。
+2. 不要求 Agent 自己串联 Java 本体内部的每个小模块。
+3. 语义解析与真实数据执行保持分离。
+4. 内部模块可以很多，对外接口按稳定业务职责收敛。
+5. 若某类能力输入输出、性能或安全边界明显不同，可以放心拆成独立接口，不为追求数量少而制造万能接口。
 
-执行：
+## 8. 云端 Agent 禁止事项
 
-```text
-1. 抽取 business_object=广告，metric_phrase=广告成功率，filter=level=GOLD，time=最近一个月。
-2. 调 locateNode("广告")。
-3. 选择广告点击分类 business_and_platform.ADV.AdvertiserRebate.pps_click，必要时追问。
-4. 调 getNextLevelNode。
-5. 找到逻辑实体「广告测试」。
-6. 调 getLogicEntityRealModel。
-7. 在已部署指标中找 nameCn=广告成功率。
-8. 应用 level=GOLD 过滤。
-9. 应用最近一个月时间范围。
-10. 如果 SQL 时间字段可确认，执行只读查询。
-11. 返回数值、时间范围、指标口径和必要解释。
-```
-
-## 12. 不要做的事
-
-1. 不要把 `getLogicEntityDefineInfo` 的未部署指标当成生产查数依据。
-2. 不要把曝光率默认当成成功率。
-3. 不要把点击率默认当成成功率。
-4. 不要在无法确认时间字段时硬改 SQL。
-5. 不要在多个高置信候选中静默选一个。
-6. 不要把所有具体业务指标都写进本体配置。
+1. 不在 Skill 中复制 Java aliases、Metric Family、公式或业务规则。
+2. 不用自由联想替代 `locateNode` 或 `resolveMetric`。
+3. 不自行扫描 RealModel 并实现另一套 Phase B。
+4. 不自行构造分类、实体或指标 ID。
+5. 不执行、改写或拼接 SQL。
+6. 不把成功率、成功次数和请求次数视为同一个指标。
+7. 不把平均、最小、最大、P95/P99 等口径互相替代。
+8. 不在多个高置信候选中静默选择。
+9. 不使用 `getLogicEntityDefineInfo` 中未部署的定义指标做生产查数。
+10. 不使用本地假数据替代真实接口结果。

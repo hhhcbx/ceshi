@@ -1,124 +1,76 @@
-# locateNode 本体定位 MVP 代码侧实施方案
+# locateNode 别名语义层 MVP 代码侧实施方案
 
 ## 1. 文档定位
 
-本文不是给云端问数 Agent 的 Skill 规则，而是写给 **Java 代码侧弱 Agent / 工程实现者** 的实施文档。
+本文写给 **Java 代码侧弱 Agent / 工程实现者**，用于指导在 databp Java 工程中改造 `locateNode` 代码和 resources YAML。
 
-这里的角色边界必须明确：
+角色边界：
 
-1. **Java 侧弱 Agent**：在 IDEA 中辅助修改 databp Java 代码、resources YAML、单测和本地验证。它处在内部开发环境里，能访问 Java 工程、内部依赖、已有 `resources/DataModel` 目录和相关服务代码。
-2. **云端 Agent**：databp 部署到云上并刷新 MCP/Swagger 后，另一个 Agent 调用 `locateNode`、`getNextLevelNode`、`getLogicEntityRealModel` 等接口完成问数编排。
-3. **本文只管 Java 侧**：目标是改造 `locateNode` 的代码和 resources 中的本体 YAML，让 `locateNode` 融入本体语义层。
-4. **云端 Agent 的调用规程另写**：`docs/agent-realmodel-query-rules.md` 才是给云端 Agent Skill/规则看的文档，两者不能混在一起。
+1. **Java 侧弱 Agent**：在 IDEA 中辅助编码，能访问内部 Java 工程、`resources/DataModel`、已有 controller/service 代码和内部依赖。
+2. **云端 Agent**：databp 部署到云上并刷新 MCP/Swagger 后，调用 `locateNode`、`getNextLevelNode`、`getLogicEntityRealModel` 等接口完成问数编排。
+3. **本文只管 Java 侧 locateNode 改造**。
+4. **云端 Agent 的问数规程属于 `docs/agent-realmodel-query-rules.md`**，不要写进本文。
 
-因此，本文后续所有“Agent”如无特别说明，均指 **代码侧弱 Agent**。
+## 2. 这一步的本体到底是什么
 
-## 2. 背景与目标
+本阶段不要把“本体”做复杂。
 
-当前智能问数链路中，云端 Agent 已经可以调用 databp 暴露出的货架接口，但用户表达与货架节点名称之间仍存在语义鸿沟。例如：
+结合用户给的两篇本体文章，这里只取一个最小可落地思想：**本体不是另一个数据库，而是 Agent 和企业系统之间的一层业务语义映射。**
 
-- 用户说 `ads` / `ad` / `推广`，货架中可能叫「广告」。
-- 用户说「广告点击」，真实节点 ID 可能是 `business_and_platform.ADV.AdvertiserRebate.pps_click`。
-- 同一路径中可能出现多个同名或近似节点，例如上层「广告」与子层「广告」。
-- resources 中已有节点快照，但它可能落后于真实货架，不应把它当成绝对真相。
-
-本阶段不新增多个 databp 对外接口，也不把 `locateNode` 改成一站式问数接口，而是在 **Java 侧改造既有 `locateNode`**：
+在我们的 locateNode MVP 里，这层语义映射非常薄：
 
 ```text
-locateNode(keyword)
-  ↓
-先查 resources 中的本体语义层 / 节点概念配置
-  ↓
-返回候选货架分类节点 ID、路径、命中原因、置信度
-  ↓
-未命中时走旧版树搜索兜底
+用户说法 / 口语 / 英文 / 缩写
+  ↓ aliases
+货架节点 base.yaml 中已有的节点
+  ↓ id
+真实 databp 分类节点 ID
 ```
 
-MVP 目标：
-
-1. 让 `locateNode` 能识别口语化、英文、缩写和业务别名。
-2. 基于 resources 中已有 DataModel 节点快照，快速生成/维护第一版节点本体数据。
-3. 允许本体数据与真实货架存在短期不一致，先跑通流程，后续再同步补齐。
-4. 保持 `locateNode` 职责单一：只做节点定位，不查逻辑实体、不查 RealModel、不执行 SQL。
-5. 返回结构要对云端 Agent 友好：必须包含后续调用 `getNextLevelNode` 需要的真实分类 ID，以及用于消歧的路径和命中原因。
-
-## 3. 输入现状：resources/DataModel 已有节点数据
-
-现在 Java 项目的 resources 中已经有一份简要本体/节点数据，路径形态类似：
+所以，本阶段本体的主要价值就是：
 
 ```text
-resources/DataModel/
-  <node-folder>/
-    base.yaml
-    <child-node-folder>/
-      base.yaml
-      <grandchild-node-folder>/
-        base.yaml
+给每个货架节点补 aliases，提高 locateNode 的匹配准确性和召回率。
 ```
 
-每个节点一个文件夹：
+不做推理机，不做规则引擎，不做复杂 TBox/ABox，不做 schema 查询引擎。
 
-1. 节点自身信息放在该目录的 `base.yaml`。
-2. 如果它有子节点，就继续在该目录下嵌套子文件夹。
-3. 每个 `base.yaml` 通常包含：
-   - `id`
-   - `parent_category_id`
-   - `name_cn`
-   - `name_en`
-   - `description`
-4. 根据节点不同，`base.yaml` 还可能包含：
-   - `version`
-   - `owner`
-   - `offering`
-   - 其他已有字段
+### 2.1 为什么不额外设计 concept_id
 
-重要限制：
+不新增 `concept_id`。
 
-1. `resources/DataModel` 是别人已有的节点快照，可能不完全等于当前真实货架。
-2. 例如「广告点击」真实 ID 是：
+原因：
+
+1. 当前 `resources/DataModel` 的每个节点本身就是一个业务概念。
+2. 节点已有 `id`、`name_cn`、`name_en`，足以表达“这个概念是什么”。
+3. 额外维护 `concept_id` 会引入第二套命名体系，增加同步成本。
+4. MVP 阶段没有跨节点规则推理、概念继承、复杂关系传递，因此不需要独立概念 ID。
+
+结论：
+
+```text
+节点本身就是本体概念。
+节点 id 就是稳定标识。
+aliases 是这一步唯一必须新增的本体字段。
+```
+
+### 2.2 为什么不额外维护 path 字段
+
+不新增 `path` / `pathCn` 字段。
+
+原因：
+
+1. 真实货架分类 ID 已经用 `.` 分隔层级，例如：
 
 ```text
 business_and_platform.ADV.AdvertiserRebate.pps_click
 ```
 
-但当前 resources 可能只记录到：
+2. `parent_category_id` 已经记录父节点关系。
+3. 中文路径可以由云端 Agent 展示时根据已有接口结果或节点名辅助说明，不是 locateNode MVP 必须维护的资源字段。
+4. 额外维护 path 容易和真实货架不同步。
 
-```text
-business_and_platform.ADV.AdvertiserRebate
-```
-
-3. 这不是说叶子节点不该记录，只是资源数据还没完全更新。
-4. MVP 阶段不要因为数据不全而阻塞实现；先复制一份，在副本上补充/修正关键节点，跑通流程。
-5. 后续再建立同步机制或人工维护流程，使 resources 本体数据逐步贴近真实货架。
-
-## 4. 资源目录改造策略
-
-### 4.1 不直接大改原始 DataModel
-
-不要直接在原始 `resources/DataModel` 上做不可逆大规模改写。建议复制一份作为 `locateNode` 本体运行时数据源，例如：
-
-```text
-src/main/resources/ontology/metric-shelf/DataModel/
-```
-
-或按 Java 项目实际 resources 根目录放置：
-
-```text
-resources/ontology/metric-shelf/DataModel/
-```
-
-复制策略：
-
-1. 第一版从已有 `resources/DataModel` 整体复制。
-2. 在副本中补充本轮 MVP 必需的缺失节点和别名信息。
-3. 原始 `resources/DataModel` 保留为上游快照，不作为本次改造的直接编辑目标。
-4. 如果 Java 工程已有更合适的配置目录规范，优先遵循工程现有约定，但必须保证和原始 DataModel 分离。
-
-### 4.2 在副本 base.yaml 上扩展本体字段
-
-现有 `base.yaml` 字段继续保留，不破坏原字段。新增字段建议放在 `ontology` 或 `semantic` 命名空间下，避免污染原始字段语义。
-
-示例：
+结论：
 
 ```yaml
 id: business_and_platform.ADV.AdvertiserRebate.pps_click
@@ -159,6 +111,161 @@ ontology:
 广告点击示例：
 
 ```text
+locateNode 返回 id、nameCn、nameEn、parentCategoryId 即可支撑后续调用和基本消歧。
+如确实需要展示路径，可以后续由调用侧或现有树数据生成，不在 MVP 手工维护。
+```
+
+## 3. 当前已有资源：resources/DataModel
+
+Java 项目 resources 中已有简要节点数据，路径类似：
+
+```text
+resources/DataModel/
+  <node-folder>/
+    base.yaml
+    <child-node-folder>/
+      base.yaml
+```
+
+规则：
+
+1. 每个节点一个文件夹。
+2. 每个节点目录有一个 `base.yaml`。
+3. 有子节点时继续嵌套子文件夹。
+4. `base.yaml` 通常已有：
+   - `id`
+   - `parent_category_id`
+   - `name_cn`
+   - `name_en`
+   - `description`
+5. 不同节点还可能有：
+   - `version`
+   - `owner`
+   - `offering`
+   - 其他字段
+
+已知限制：
+
+1. 这份资源可能落后于真实货架。
+2. 例如「广告点击」真实 ID 是：
+
+```text
+business_and_platform.ADV.AdvertiserRebate.pps_click
+```
+
+但当前 resources 可能只记录到：
+
+```text
+business_and_platform.ADV.AdvertiserRebate
+```
+
+3. 这不是说叶子节点不该记录，只是信息没更新。
+4. MVP 阶段先跑通流程，缺失节点后续慢慢同步。
+
+## 4. 资源修改策略：复制一份，再只加 aliases
+
+不要直接大规模修改原始 `resources/DataModel`。
+
+建议：
+
+```text
+原始快照：resources/DataModel
+运行时副本：resources/ontology/metric-shelf/DataModel
+```
+
+实施策略：
+
+1. 复制现有 `resources/DataModel` 到本体运行时目录。
+2. 在副本的 `base.yaml` 中保留所有原字段。
+3. 只新增一个字段：`aliases`。
+4. 如副本缺少 MVP 必需叶子节点，先手工补少量关键节点。
+5. 后续再慢慢同步完整节点树。
+
+为什么只加 `aliases`：
+
+1. 用户这一步要解决的是“用户怎么说”和“货架节点叫什么”不一致。
+2. aliases 足以表达同义词、英文、缩写、口语说法。
+3. 其他复杂字段会让第一版实现和维护变重，但收益不明显。
+
+## 5. base.yaml 最小格式
+
+### 5.1 已有节点只补 aliases
+
+广告大类示例：
+
+```yaml
+id: business_and_platform.ADV
+parent_category_id: business_and_platform
+name_cn: 广告
+name_en: Advertising
+description: 广告业务大类。
+aliases:
+  - 广告
+  - ads
+  - ad
+  - 推广
+  - 广告业务
+```
+
+说明：
+
+1. `aliases` 直接放在 `base.yaml` 顶层即可。
+2. 不新增 `ontology.concept_id`。
+3. 不新增 `ontology.tags`。
+4. 不新增 `ontology.match_reason`。
+5. 不新增 `path`。
+
+### 5.2 缺失叶子节点可先补 base.yaml
+
+广告点击示例：
+
+```yaml
+id: business_and_platform.ADV.AdvertiserRebate.pps_click
+parent_category_id: business_and_platform.ADV.AdvertiserRebate
+name_cn: 广告点击
+name_en: pps_click
+description: 广告点击节点，MVP 阶段根据真实货架 ID 手工补齐。
+aliases:
+  - 广告点击
+  - 点击广告
+  - 广告 click
+  - ad click
+  - ads click
+  - pps click
+  - pps_click
+```
+
+注意：
+
+1. 真实 `id` 必须写完整。
+2. 不要根据中文名、目录名或父节点动态拼真实 ID。
+3. 如果真实货架已确认有叶子节点，但 resources 副本缺失，可以先手工补齐。
+4. 如果不确定真实 ID，不要编造，先只给已有节点补 aliases。
+
+## 6. locateNode 代码改造边界
+
+新版 `locateNode` 只做节点定位：
+
+1. 接收短 keyword，例如「广告」「ads」「广告点击」「pps click」。
+2. 加载 DataModel 副本中的所有 `base.yaml`。
+3. 用 `id/name_cn/name_en/aliases` 匹配 keyword。
+4. 返回匹配到的分类节点候选。
+5. 未命中时走旧版树搜索兜底。
+
+不做：
+
+1. 不解析完整问数意图。
+2. 不调用 `getNextLevelNode`。
+3. 不调用 `getLogicEntityRealModel`。
+4. 不调用 `getLogicEntityDefineInfo`。
+5. 不查指标。
+6. 不拼 SQL。
+7. 不执行 SQL。
+8. 不做推理机或规则判断。
+
+## 7. DataModel loader 最小实现
+
+### 7.1 加载方式
 ontology/metric-shelf/DataModel/business_and_platform/ADV/AdvertiserRebate/pps_click/base.yaml
 ```
 
@@ -335,7 +442,93 @@ class OntologyNode {
 
 旧字段可以扩展，但返回中必须包含云端 Agent 后续调用需要的分类 ID。
 
-建议结构：
+MVP loader 做简单递归扫描即可：
+
+```text
+resources/ontology/metric-shelf/DataModel
+  ↓
+递归找到所有 base.yaml
+  ↓
+解析 id / parent_category_id / name_cn / name_en / aliases
+  ↓
+缓存为内存列表
+```
+
+不需要：
+
+1. 不需要图数据库。
+2. 不需要 OWL 文件。
+3. 不需要推理机。
+4. 不需要单独索引服务。
+5. 不需要概念 ID 映射表。
+
+### 7.2 Java 结构建议
+
+```java
+class LocateNodeEntry {
+    String id;
+    String parentCategoryId;
+    String nameCn;
+    String nameEn;
+    List<String> aliases;
+}
+```
+
+如果已有 DTO/VO 可以复用，就复用已有结构，不必为了本体新增复杂对象模型。
+
+### 7.3 容错规则
+
+1. 缺少 `id` 的 `base.yaml` 跳过并打 warning。
+2. 缺少 `aliases` 的节点仍然可用 `id/name_cn/name_en` 匹配。
+3. 单个 YAML 解析失败，不要拖垮整个服务。
+4. 启动日志打印加载节点数、带 aliases 节点数、坏 YAML 数。
+
+## 8. 匹配规则
+
+### 8.1 归一化
+
+匹配前做最小归一化：
+
+1. trim。
+2. 英文转小写。
+3. 多空格合并。
+4. `_`、`-`、`.` 可以当弱分隔符处理，方便 `pps_click` 和 `pps click` 互相命中。
+
+### 8.2 匹配字段
+
+只匹配这些字段：
+
+1. `id`
+2. `name_cn`
+3. `name_en`
+4. `aliases`
+
+不要匹配 `description`，避免描述文本带来噪声。
+
+### 8.3 匹配优先级
+
+建议顺序：
+
+1. `keyword == id`
+2. `keyword == name_cn/name_en`
+3. `keyword == aliases[*]`
+4. `aliases[*]` 与 `keyword` 做包含匹配
+5. `name_cn/name_en` 与 `keyword` 做包含匹配
+6. 本体副本未命中时，走旧树搜索
+
+### 8.4 排序规则
+
+1. 精确匹配优先于包含匹配。
+2. alias 命中优先于 name 包含命中。
+3. 更长的 `id` 可排在更前，因为通常表示更具体节点。
+4. 不要静默丢弃同名节点。
+5. 多个候选都合理时全部返回，交给云端 Agent 结合问题继续判断或追问。
+
+## 9. locateNode 返回结构
+
+尽量沿用旧结构，少扩字段。
+
+建议最小返回：
 
 ```json
 {
@@ -344,13 +537,9 @@ class OntologyNode {
       "id": "business_and_platform.ADV.AdvertiserRebate.pps_click",
       "nameCn": "广告点击",
       "nameEn": "pps_click",
-      "path": "业务平台 > 广告 > 广告 > 广告点击",
-      "matchType": "ONTOLOGY_ALIAS_EXACT",
-      "matchedField": "ontology.aliases",
-      "matchedValue": "ads click",
-      "matchedConceptId": "advertising_click",
-      "confidence": "HIGH",
-      "reason": "keyword 命中广告点击节点 ontology.aliases 中的 ads click。"
+      "parentCategoryId": "business_and_platform.ADV.AdvertiserRebate",
+      "matchType": "ALIAS",
+      "matchedValue": "ad click"
     }
   ]
 }
@@ -362,151 +551,63 @@ class OntologyNode {
 |---|---|
 | `id` | 真实货架分类 ID，后续传给 `getNextLevelNode` |
 | `nameCn` | 节点中文名 |
-| `nameEn` | 节点英文名，可为空 |
-| `path` | 中文路径，用于展示和消歧 |
-| `matchType` | 如 `ONTOLOGY_ALIAS_EXACT`、`ONTOLOGY_NAME_CONTAINS`、`RAW_TREE_SEARCH` |
-| `matchedField` | 命中的字段，如 `ontology.aliases`、`name_cn`、`id` |
-| `matchedValue` | 命中的具体值 |
-| `matchedConceptId` | 命中的本体概念 ID，可为空 |
-| `confidence` | `HIGH` / `MEDIUM` / `LOW` |
-| `reason` | 给云端 Agent 和人看的命中原因 |
+| `nameEn` | 节点英文名 |
+| `parentCategoryId` | 父分类 ID，用于基本消歧 |
+| `matchType` | `ID` / `NAME` / `ALIAS` / `RAW_TREE_SEARCH` |
+| `matchedValue` | 命中的原始值 |
 
-兼容注意：
+不建议新增：
 
-1. 如果旧版 `locateNode` 已经返回 `depth`，可以保留，但不要让云端 Agent 依赖它。
-2. 层级判断应以点分 ID 前缀为准，不以 `depth` 为准。
-3. 如果后端接口契约暂时不方便扩展太多字段，至少要保留 `id/nameCn/nameEn/path`，并尽量加上 `matchType/reason`。
+1. `matchedConceptId`：节点 id 已经是概念稳定标识。
+2. `path`：id 已有层级分隔，path 容易重复维护。
+3. `confidence`：MVP 先由匹配顺序排序，不引入人工置信度。
+4. `reason`：`matchType + matchedValue` 已能解释第一版命中原因。
 
-## 9. 广告点击 MVP 数据样例
+如果旧接口已有 `path/depth` 等字段，可以保留兼容，但新逻辑不依赖它们。
 
-第一阶段建议至少补齐广告相关样例，用来验证英文缩写和缺失叶子节点的流程。
-
-### 9.1 广告大类
-
-```yaml
-id: business_and_platform.ADV
-parent_category_id: business_and_platform
-name_cn: 广告
-name_en: Advertising
-description: 广告业务大类。
-
-ontology:
-  concept_id: advertising
-  aliases:
-    - 广告
-    - ads
-    - ad
-    - 推广
-    - 广告业务
-  confidence: HIGH
-  tags:
-    - advertising
-  match_reason: 业务平台下广告大类节点。
-```
-
-### 9.2 广告返利/广告子节点
-
-```yaml
-id: business_and_platform.ADV.AdvertiserRebate
-parent_category_id: business_and_platform.ADV
-name_cn: 广告
-name_en: AdvertiserRebate
-description: 广告返利相关子节点。当前 resources 可能只记录到这一层。
-
-ontology:
-  concept_id: advertiser_rebate_ad
-  aliases:
-    - 广告返利
-    - 广告投放
-    - advertiser rebate
-    - rebate ad
-  confidence: MEDIUM
-  tags:
-    - advertising
-    - rebate
-  match_reason: ADV 下广告返利相关同名广告节点，需要结合更具体语境判断。
-```
-
-### 9.3 广告点击叶子节点
-
-```yaml
-id: business_and_platform.ADV.AdvertiserRebate.pps_click
-parent_category_id: business_and_platform.ADV.AdvertiserRebate
-name_cn: 广告点击
-name_en: pps_click
-description: 广告点击节点，MVP 阶段根据真实货架 ID 手工补齐。
-
-ontology:
-  concept_id: advertising_click
-  aliases:
-    - 广告点击
-    - 点击广告
-    - ad click
-    - ads click
-    - pps click
-    - pps_click
-  confidence: HIGH
-  tags:
-    - advertising
-    - click
-  match_reason: 广告点击真实货架分类节点。
-```
-
-## 10. 弱 Agent 实施步骤
-
-1. 在 Java 项目中确认原始节点快照目录：`resources/DataModel`。
-2. 复制一份到本体运行时目录，例如 `resources/ontology/metric-shelf/DataModel`。
-3. 不直接大规模改写原始 `resources/DataModel`。
-4. 在副本 `base.yaml` 中保留原字段，并新增 `ontology` 字段块。
-5. 手工补齐 MVP 关键缺失节点，例如 `business_and_platform.ADV.AdvertiserRebate.pps_click`。
-6. 新增 DataModel loader，递归扫描所有 `base.yaml`。
-7. 将每个 `base.yaml` 解析为 `OntologyNode`，并构建内存索引。
-8. 修改 `locateNode`：先查本体索引，再走旧树搜索兜底。
-9. 本体命中时返回结构化候选，至少包含 `id/nameCn/nameEn/path/matchType/reason`。
-10. 本体未命中时保留旧搜索输出，必要时标记 `matchType=RAW_TREE_SEARCH`。
-11. 加日志：加载节点数、alias 节点数、命中方式、兜底次数、跳过坏 YAML 次数。
-12. 本地测试通过后，再按既有 databp 云上流程部署并刷新 MCP/Swagger 契约。
-
-## 11. 本地测试 checklist
+## 10. 本地测试 checklist
 
 最小测试用例：
 
 | 输入 | 期望 |
 |---|---|
-| `广告` | 返回 `business_and_platform.ADV` 以及相关同名广告节点 |
-| `ads` | 返回广告相关节点，不应为空 |
-| `ad` | 返回广告相关节点，不应为空，但可能有多个候选 |
+| `广告` | 返回 `business_and_platform.ADV` 以及相关同名节点 |
+| `ads` | 通过 aliases 返回广告相关节点 |
+| `ad` | 通过 aliases 返回广告相关节点，允许多个候选 |
 | `广告点击` | 返回 `business_and_platform.ADV.AdvertiserRebate.pps_click` |
 | `ad click` | 返回 `business_and_platform.ADV.AdvertiserRebate.pps_click` |
 | `pps click` | 返回 `business_and_platform.ADV.AdvertiserRebate.pps_click` |
-| `business_and_platform.ADV.AdvertiserRebate.pps_click` | 精确返回该节点 |
+| `pps_click` | 返回 `business_and_platform.ADV.AdvertiserRebate.pps_click` |
 | 不存在的词 | 走旧树搜索；仍无结果则返回空数组 |
 
-还应验证：
+还要验证：
 
-1. 删除或损坏一个非关键 `base.yaml`，服务不应整体启动失败。
-2. 某节点没有 `ontology` 字段时，仍可通过 `id/name_cn/name_en` 命中。
-3. 同名节点都返回，不要因为去重只留下一个。
-4. 返回顺序符合精确匹配、置信度、具体程度优先规则。
+1. 没有 aliases 的节点仍可通过 `id/name_cn/name_en` 命中。
+2. 同名节点都返回。
+3. 单个坏 YAML 不影响服务启动。
+4. 英文大小写不敏感。
+5. `_` 和空格变体能互相命中。
 
-## 12. 云上部署前检查
+## 11. 弱 Agent 实施步骤
 
-虽然本文主要给代码侧弱 Agent，但 Java 改造最终要给云端 Agent 调用，所以部署前必须确认：
+1. 确认 Java 工程中的原始 `resources/DataModel`。
+2. 复制到本体运行时目录，例如 `resources/ontology/metric-shelf/DataModel`。
+3. 在副本中给关键节点补 `aliases`。
+4. 如关键叶子节点缺失，确认真实 ID 后，在副本中手工补 `base.yaml`。
+5. 新增或修改 loader，递归读取所有 `base.yaml`。
+6. 修改 `locateNode`：先按 `id/name_cn/name_en/aliases` 匹配副本数据。
+7. 未命中时调用旧树搜索兜底。
+8. 返回旧结构 + 少量匹配解释字段：`parentCategoryId/matchType/matchedValue`。
+9. 跑本地 checklist。
+10. 云上部署前确认接口注解、鉴权 tag、返回类型仍与已打通版本一致，并刷新 MCP/Swagger。
 
-1. `locateNode` 仍在 databp 服务内，不通过 gateway 转发真实数据。
-2. Controller、注解体系、鉴权 tag、返回类型仍与已验证可用的 databp 接口保持一致。
-3. 不混用 Spring `@GetMapping` / `@RequestParam` 和既有 JAX-RS 风格。
-4. 修改 resources 后，部署包确实包含新的本体 DataModel 副本。
-5. 云上部署后刷新 Swagger/MCP 契约。
-6. 用中文和英文 keyword 都做 smoke test，例如 `广告`、`ads`、`广告点击`、`ad click`。
+## 12. 常见错误
 
-## 13. 常见错误
-
-1. 把给云端 Agent 的问数编排规则写进本文，导致 Java 侧弱 Agent 实施目标发散。
-2. 把 `locateNode` 改成一站式问数接口，在里面查实体、查 RealModel、执行 SQL。
-3. 直接大规模修改原始 `resources/DataModel`，没有保留上游快照。
-4. 假设 resources 节点一定等于真实货架，遇到缺失叶子节点就停止推进。
-5. 根据中文路径或目录名动态拼真实 `categoryId`。
-6. 删除旧版树搜索兜底，导致本体数据不全时召回下降。
-7. 静默丢弃同名候选节点，让云端 Agent 失去消歧机会。
-8. 让云端 Agent 依赖 `depth` 判断层级，而不是使用点分 ID 前缀。
+1. 把本体做成另一套数据库。
+2. 为第一版引入 `concept_id`、`confidence`、`tags`、`reason` 等额外维护字段。
+3. 手工维护中文 path，导致它和真实货架或 id 层级不同步。
+4. 把云端 Agent 的问数编排规则写进本文。
+5. 在 `locateNode` 里查实体、查 RealModel 或执行 SQL。
+6. 删除旧树搜索兜底。
+7. 把 `description` 也纳入高优匹配，导致误召回。
+8. 直接大改原始 `resources/DataModel`，没有保留可回退副本。
