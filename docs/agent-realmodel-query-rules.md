@@ -1,289 +1,174 @@
-# Agent 基于 RealModel 的指标问数规程
+# 云端 Agent：RealModel 指标问数规程
 
-## 1. 目标
+## 1. 目标与边界
 
-本文规定 Agent 在拿到货架分类节点后，如何使用 databp 已有接口查询真实已部署指标，并完成指标匹配、筛选、消歧和查数。
+本文指导云端 Agent 使用现有工具完成真实问数。后端接口不可修改；
+`getLogicEntityRealModel` 的 Swagger 响应已被投影为精简指标目录，
+`queryIndicatorDimensionData` 负责按指标 ID 和时间范围查数。
 
-核心原则：
+两个语义层分工如下：
 
-1. 生产查数以 `getLogicEntityRealModel` 返回的已部署指标为准。
-2. `getLogicEntityDefineInfo` 只用于测试、对照或排查，不作为生产查数依据。
-3. 本体层主要解决业务对象到货架分类节点的定位问题。
-4. 指标匹配、过滤条件、时间条件由 Agent 基于 RealModel 结果处理。
-5. 多个高置信候选时必须追问，不要静默猜。
+1. Phase A（节点 aliases）：把用户业务说法映射到货架分类节点。
+2. Phase B（Metric Family）：把用户指标说法映射到 RealModel 中的真实指标。
 
-## 2. 总体链路
+Agent 不执行 SQL，不从 `getLogicEntityDefineInfo` 获取生产指标，不自行构造节点、实体或指标 ID。
+
+## 2. 完整调用链
 
 ```text
 用户问题
-  ↓
-Agent 抽取槽位
-  ↓
-locateNode(业务/对象定位短语)
-  ↓
-getNextLevelNode(categoryId, CATEGORY)
-  ↓
-getLogicEntityRealModel(logicEntityId)
-  ↓
-在已部署指标中匹配 metric_phrase
-  ↓
-应用 filters/time_range
-  ↓
-必要时消歧
-  ↓
-查 SQL / 返回结果
+  -> 抽取 business_object / metric_phrase / time_range
+  -> locateNode(business_object)
+  -> getNextLevelNode(categoryId, CATEGORY)
+  -> 选择逻辑实体
+  -> getLogicEntityRealModel(logicEntityId)
+  -> 按 Metric Family 匹配真实 metric.id
+  -> 将时间表达转换成明确 startTime/endTime
+  -> queryIndicatorDimensionData(metric.id, startTime, endTime)
+  -> 展示真实返回
 ```
+
+不要跳过 RealModel 直接猜指标 ID，也不要把逻辑实体 ID 传给查数接口。
 
 ## 3. 槽位抽取
 
-Agent 先从用户问题抽取以下槽位：
-
 ```yaml
-business_object: 用于定位货架节点的业务对象
-metric_phrase: 用户想查的指标短语
-filters: 指标或数据筛选条件
-time_range: 时间范围
-query_mode: definition | value | trend | comparison
+business_object: 用于 locateNode 的业务对象短语
+metric_phrase: 用户要查询的指标短语
+time_range: 用户时间表达及转换后的明确起止时间
+query_mode: value | trend | comparison
+filters: 可选的指标元数据或维度过滤条件
 ```
 
 示例：
 
 ```text
-用户问题：最近一个月的指标等级是黄金的广告成功率是多少？
+最近一个月推广业务的成功占比是多少？
 ```
 
-抽取：
-
 ```yaml
-business_object: 广告
-metric_phrase: 广告成功率
-filters:
-  - field: level
-    operator: =
-    value: GOLD
+business_object: 推广业务
+metric_phrase: 成功占比
 time_range:
   text: 最近一个月
-  type: ROLLING_LAST_MONTH
+  startTime: 按当前日期和接口格式计算
+  endTime: 按当前日期和接口格式计算
 query_mode: value
 ```
 
-## 4. 节点定位
+必须把 `business_object` 原样优先传给 `locateNode`，让 Phase A aliases 发挥作用；
+只有未命中时才做 Agent 语义改写兜底，并在回答中说明。
 
-Agent 使用 `business_object` 调用 `locateNode`：
+## 4. Phase A：定位节点和实体
 
-```text
-locateNode("广告")
-```
+1. 调用 `locateNode(business_object)`。
+2. 多个分类候选时，按用户粒度和点分 ID 做最小覆盖根/最贴合节点选择。
+3. 无法唯一确定时追问，不要静默猜。
+4. 对最终分类调用一次 `getNextLevelNode(id, "CATEGORY")`。
+5. 本次广告演示选择“广告测试实体”；必须使用接口返回的真实实体 ID。
+6. 多个实体都可能包含目标指标时，可按实体名收敛后逐个取 RealModel；仍有多个高置信结果时追问。
 
-如果返回多个候选：
+## 5. Phase B：匹配真实指标
 
-1. 优先选择与用户业务对象最具体、最贴合的节点。
-2. 如果用户指标短语能帮助判断，可以结合指标短语选择，例如「广告成功率」可能比广告大类更接近广告点击链路。
-3. 如果仍有多个高置信候选，必须追问用户。
+### 5.1 通用顺序
 
-不要把长篇用户输入原样传给 `locateNode`，除非槽位抽取失败。
+1. 用 Metric Family aliases 识别指标族和变体。
+2. 在 RealModel `metrics` 中先匹配 `nameCn`，再匹配 `nameEn`，必要时用 `description` 消歧。
+3. 保留平均/最小/最大、P95/P99、次数/比率等限定词，不能在归一化时删除。
+4. 一个高置信直接指标：使用其真实 `id`。
+5. 多个高置信指标：向用户列出名称和实体并追问。
+6. 没有符合变体的指标：报告未找到，不能用近似但不同口径代替。
 
-## 5. 获取逻辑实体
+### 5.2 成功率
 
-对选中的分类节点调用：
+`成功率`、`成功占比`、`接口成功率`、`success_rate` 属于 `success_rate` family：
 
-```text
-getNextLevelNode(categoryId, CATEGORY)
-```
+1. 优先直接指标，名称含“成功率”或 `success_rate`。
+2. 成功次数和请求次数是公式候选，不是直接成功率。
+3. 直接指标存在时，直接查询它；不要重复查两个次数指标后重算。
+4. 只有公式候选时，说明“成功率 = 成功次数 / 请求次数”并先请求确认；当前查数接口每次按单一指标 ID 查询，
+   如需组合两次返回，还必须确认时间粒度和对齐方式，不能直接把两个总值随意相除。
 
-注意：
+### 5.3 时延与内存
 
-1. `getNextLevelNode` 会返回该分类及后代分类下的逻辑实体。
-2. 如果节点过高，返回实体可能很多，Agent 应优先筛选与业务对象相关的逻辑实体。
-3. 后续调用 RealModel 时使用逻辑实体的真实 `id`。
+1. “平均延迟”可匹配“平均时延”，但不能匹配 P95/P99 时延。
+2. “最低内存占用率”可匹配“最小内存使用率”。
+3. “最高内存使用率”可匹配“最大内存使用率”。
+4. 最小值和最大值不能互相替代；使用率和使用量不能互相替代。
 
-## 6. 获取已部署指标
+## 6. RealModel 控量规则
 
-对候选逻辑实体调用：
+Swagger 投影后的 RealModel 应只提供实体标识和指标的：`id`、`nameCn`、`nameEn`、
+`description`、`unit`、`type`、`level`（后四项按真实存在情况返回）。
 
-```text
-getLogicEntityRealModel(logicEntityId)
-```
+Agent 规则：
 
-只使用 RealModel 中已部署的指标和 SQL 做生产查询。
+1. 只读取匹配所需字段，不复述整个指标目录。
+2. 指标 `id` 必须来自本次 RealModel 返回。
+3. 字段缺失时不猜。例如没有 `level` 就不能可靠执行“黄金指标”过滤。
+4. 如果工具仍返回巨型对象，停止继续批量调用并报告 Swagger 投影未生效，避免上下文爆量。
 
-`getLogicEntityDefineInfo` 的定位：
+## 7. 时间范围与查数
 
-```text
-仅用于测试、对照、排查未部署指标，不用于生产查数。
-```
+1. 将相对时间转换为明确 `startTime` 和 `endTime`。
+2. “最近一个月”默认解释为截止当前时刻的滚动一个月；“上个月”是上一个自然月，二者不同。
+3. 使用工具实际要求的时间格式和时区，不可凭示例猜格式。
+4. 调用 `queryIndicatorDimensionData(id, startTime, endTime)`，其中 `id` 是指标 ID。
+5. 最终回答必须回显实际起止时间和时区。
+6. 不改变接口返回的聚合语义：接口返回时间序列就展示趋势；只返回单值就展示单值；返回空就如实说明无数据。
+7. 用户没有给时间范围且查数接口要求必填时，先追问，不能默选一个范围而不说明。
 
-## 7. 指标匹配规则
+## 8. 完整演示
 
-### 7.1 基础优先级
-
-给定用户指标短语 `metric_phrase`，在 RealModel 指标列表中按以下顺序匹配：
-
-1. `nameCn` 完全等于 `metric_phrase`。
-2. `nameEn` 完全等于英文或编码化后的 `metric_phrase`。
-3. `nameCn` 包含完整 `metric_phrase`。
-4. `metric_phrase` 包含 RealModel 指标中文名。
-5. 按指标族规则匹配。
-
-### 7.2 成功率规则
-
-用户说「成功率」时：
-
-1. 优先找直接指标：名称包含「成功率」或 `success_rate`。
-2. 如果没有直接成功率，查找公式候选：
-   - 分子：名称包含「成功次数」「成功量」「success_count」。
-   - 分母：名称包含「请求次数」「请求量」「request_count」。
-3. 「曝光率」「点击率」虽然也是 rate，但不能默认等同成功率。
-4. 如果只有公式候选，默认追问用户是否按该口径计算，除非业务规则明确允许自动计算。
-
-### 7.3 曝光率规则
-
-用户说「曝光率」时：
-
-1. 优先找名称包含「曝光率」或 `exposure_rate` 的指标。
-2. 不要自动替换为成功率、点击率。
-3. 如只有曝光次数和总请求次数，应说明这是推导口径并请求确认。
-
-### 7.4 点击率规则
-
-用户说「点击率」时：
-
-1. 优先找名称包含「点击率」或 `click_rate` / `ctr` 的指标。
-2. 如只有点击次数和曝光次数，可作为公式候选。
-3. 不要自动替换为广告成功率。
-
-### 7.5 时延规则
-
-用户说「时延」「延迟」「latency」「rt」时：
-
-1. 优先找名称包含「时延」「延迟」「耗时」「latency」「rt」的指标。
-2. 如果用户指定 P95/P99/平均值，必须匹配对应分位或聚合口径。
-3. P95、P99、平均时延不能互相默认替换。
-
-### 7.6 内存使用率规则
-
-用户说「内存使用率」「内存占用」「memory usage」时：
-
-1. 优先找名称包含「内存」「memory」「mem」的指标。
-2. 如果同时存在使用量和使用率，按用户短语区分：
-   - 使用率：ratio/rate/percent。
-   - 使用量：bytes/MB/GB/count。
-
-## 8. 过滤条件规则
-
-### 8.1 指标等级
-
-| 用户说法 | 过滤条件 |
-|---|---|
-| 黄金、黄金指标、gold | `level = GOLD` |
-| 健康、健康指标、health | `level = HEALTH` |
-| 普通、普通指标、normal | `level = NORMAL` |
-
-如果 RealModel 指标中没有 `level` 字段，Agent 应说明无法可靠按等级过滤。
-
-### 8.2 指标类型
-
-| 用户说法 | 过滤条件 |
-|---|---|
-| 基础指标、原子指标、basic | `type = BASIC` |
-| 衍生指标、派生指标、derived | `type = DERIVED` |
-| 复合指标、组合指标、composite | `type = COMPOSITE` |
-
-如果 RealModel 中没有 `type` 字段，Agent 应说明无法可靠按类型过滤。
-
-### 8.3 端侧打点
-
-用户说「端侧」「端侧打点」「客户端打点」「client side」时，尝试在 RealModel 指标元数据中查找：
+用户：
 
 ```text
-collectSide
-sourceType
-dataSource
-tags
-nameCn/nameEn
-```
-
-候选值包括：
-
-```text
-CLIENT
-client
-端侧
-客户端
-device_side
-```
-
-如果 RealModel 没有可判断字段，不要猜，应明确说明无法可靠筛选端侧打点口径。
-
-## 9. 时间条件规则
-
-常见时间表达式：
-
-| 用户说法 | 解释 |
-|---|---|
-| 最近一个月、近一个月、过去一个月 | 滚动最近 1 个月 |
-| 最近 7 天、近 7 天 | 滚动最近 7 天 |
-| 昨天 | 前一自然日 |
-| 上个月 | 上一个自然月 |
-
-回答或查询时必须写清楚实际时间范围。
-
-如果无法确认 SQL 的时间字段，不要强行注入时间条件，应返回：
-
-```text
-找到了指标 SQL，但无法确认时间字段，不能安全筛选时间范围。
-```
-
-## 10. 消歧规则
-
-必须追问的情况：
-
-1. 多个逻辑实体都包含同名或高相似指标。
-2. 多个指标都与用户短语高置信匹配。
-3. 只有公式候选但没有直接指标，且业务未允许自动计算。
-4. 用户限定条件无法映射到 RealModel 元数据。
-5. 用户同时提出多个目标但没有说明聚合或对比方式。
-
-追问格式建议：
-
-```text
-我找到了多个可能的「广告成功率」口径：
-1. 广告成功率：已部署直接指标，位于广告测试实体。
-2. 广告接口成功次数 / 广告接口请求次数：可推导成功率。
-3. 广告曝光率：相关但含义不同，不能默认作为成功率。
-
-请确认要查询哪一个口径？
-```
-
-## 11. 广告成功率完整示例
-
-用户问题：
-
-```text
-最近一个月的指标等级是黄金的广告成功率是多少？
+最近一个月推广业务的成功占比是多少？
 ```
 
 执行：
 
 ```text
-1. 抽取 business_object=广告，metric_phrase=广告成功率，filter=level=GOLD，time=最近一个月。
-2. 调 locateNode("广告")。
-3. 选择广告点击分类 business_and_platform.ADV.AdvertiserRebate.pps_click，必要时追问。
-4. 调 getNextLevelNode。
-5. 找到逻辑实体「广告测试」。
-6. 调 getLogicEntityRealModel。
-7. 在已部署指标中找 nameCn=广告成功率。
-8. 应用 level=GOLD 过滤。
-9. 应用最近一个月时间范围。
-10. 如果 SQL 时间字段可确认，执行只读查询。
-11. 返回数值、时间范围、指标口径和必要解释。
+1. 抽取 business_object=推广业务、metric_phrase=成功占比、time_range=最近一个月。
+2. locateNode("推广业务")，通过 Phase A alias 命中广告节点。
+3. getNextLevelNode，找到“广告测试实体”。
+4. getLogicEntityRealModel，读取六个真实指标的精简目录。
+5. Phase B 将“成功占比”识别为 success_rate。
+6. 从六个指标中唯一选中“广告接口成功率”，保存其真实 id。
+7. 计算并记录明确 startTime/endTime。
+8. queryIndicatorDimensionData(指标 id, startTime, endTime)。
+9. 返回真实值/序列、实际时间范围、指标名称和口径说明。
 ```
 
-## 12. 不要做的事
+推荐回答结构：
 
-1. 不要把 `getLogicEntityDefineInfo` 的未部署指标当成生产查数依据。
-2. 不要把曝光率默认当成成功率。
-3. 不要把点击率默认当成成功率。
-4. 不要在无法确认时间字段时硬改 SQL。
-5. 不要在多个高置信候选中静默选一个。
-6. 不要把所有具体业务指标都写进本体配置。
+```text
+命中对象：广告 > 广告测试实体
+指标：广告接口成功率（用户说法“成功占比”按 success_rate 口径匹配）
+查询范围：<startTime> 至 <endTime>（<timezone>）
+结果：<queryIndicatorDimensionData 的真实返回摘要>
+口径说明：优先使用已部署的直接成功率指标；未用成功次数/请求次数重新计算。
+```
+
+## 9. 必须消歧或失败的情况
+
+1. 多个分类节点或逻辑实体同样匹配。
+2. RealModel 中存在多个同口径直接指标。
+3. 只有公式候选，而用户尚未确认计算口径。
+4. 用户问 P95 时延，但只有平均时延。
+5. 指标缺少真实 ID。
+6. 相对时间无法按接口要求转成确定值。
+7. RealModel 投影未生效导致返回不可控。
+8. 查数接口返回空或报错。
+
+上述情况不得编造结果。可以追问的先追问；接口错误应简要报告已完成到哪一步。
+
+## 10. 禁止事项
+
+1. 不使用 `getLogicEntityDefineInfo` 代替 RealModel 做生产查数。
+2. 不执行、改写或拼接 SQL。
+3. 不自行构造任何 ID。
+4. 不把成功次数、请求次数、成功率当成同一指标。
+5. 不把平均、最小、最大或分位数互相替换。
+6. 不让 Agent 的自由联想替代 Phase A/Phase B；语义增强只能是明确标注的兜底。
+7. 不为了给出答案而伪造本地测试数据或数值。

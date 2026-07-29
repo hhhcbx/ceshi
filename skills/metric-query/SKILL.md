@@ -1,131 +1,184 @@
 ---
 name: metric-query
-description: 智能问数——在货架数据模型中按用户描述定位分类节点、获取逻辑实体并查询指标定义，支持按级别/类型等条件筛选指标，并以表格/图表形式呈现。当用户想查询某个业务/分类/对象相关的指标、字段或逻辑实体时使用，例如"帮我找小艺的指标"、"给我所有小艺的黄金指标"、"小艺_翻译有哪些指标"。
+description: 智能问数——通过节点 aliases 定位货架分类，从 RealModel 精简指标目录中按 Metric Family 选择真实指标 ID，再按起止时间查询并展示真实指标数据。适用于“最近一个月推广业务的成功占比是多少”“广告平均时延趋势”等问题，也支持指标定义和结构浏览。
 ---
 
-# 智能问数：货架数据模型指标查询
+# 智能问数：本体增强的真实指标查询
 
 ## 何时触发
 
-当用户想「查某个业务/分类相关的指标、字段、逻辑实体」，例如：
+用户要查询业务对象相关的指标定义、指标值、趋势、对比、字段或货架结构时使用。例如：
 
-- 「帮我找小艺的指标」
-- 「给我所有小艺的黄金指标」
-- 「小艺_翻译有哪些指标」
-- 「数据库相关的实体和指标有哪些」
+- “最近一个月推广业务的成功占比是多少？”
+- “最近 7 天广告平均延迟趋势”
+- “广告有哪些指标？”
+- “有哪些业务分类？”
 
-## 数据模型心智模型（必须先理解）
+## 心智模型
 
-- 树分两类节点：
-  - **分类节点（骨架，导航用）**：ID 是**点分字符串**，如 `business_and_platform.CEL`（小艺）、`business_and_platform.CEL.AIVision`（AI Vision）。
-  - **逻辑实体/运维对象（数据，目标）**：ID 是 **UUID**，如 `0b6b22bf-...`。
-- **点分 ID 天然编码了层级**：`A` 是 `B` 的祖先 ⟺ `B` 以 `A + "."` 开头。
-  例：`business_and_platform.CEL` 是 `business_and_platform.CEL.AIVision` 的祖先。这是**去重和选节点的核心依据**。
-- 指标（metrics）挂在**逻辑实体**上，要经「分类 → 逻辑实体 → 指标定义」三跳拿到。
-- **已确认**：`getNextLevelNode(分类)` 返回该分类**及其全部后代分类**下的所有逻辑实体（递归）。因此对祖先节点调用一次即可覆盖所有后代，绝不能对祖先与后代重复调用。
+1. **分类节点**使用点分 ID，是导航骨架；点分前缀表示祖先关系。
+2. **逻辑实体**使用 UUID，指标挂在逻辑实体上。
+3. **Phase A 节点本体**：`locateNode` 用节点 `aliases` 把“推广业务”等用户说法映射到广告分类。
+4. **Phase B Metric Family**：把“成功占比”“平均延迟”等说法映射到 RealModel 的真实指标。
+5. **RealModel** 是已部署指标目录；指标 `id` 是真实查数入口。
+6. **queryIndicatorDimensionData** 按指标 ID、开始时间和结束时间返回真实数据。
 
-工具入参、出参细节见 [references/tools.md](references/tools.md)。
-输出格式与图表规范见 [references/output-format.md](references/output-format.md)。
+工具契约见 [references/tools.md](references/tools.md)，呈现规范见
+[references/output-format.md](references/output-format.md)。
 
-## 核心工作流
+## Stage 0：意图与槽位
 
-### Stage 0 · 意图分类
+抽取：
 
-先判断用户问题属于哪类，再路由：
+```yaml
+business_object: 用于定位分类的短语
+metric_phrase: 指标短语
+time_range: 用户原话及明确起止时间
+query_mode: definition | value | trend | comparison | structure | fields
+filters: 可选的等级、类型或维度条件
+```
 
-| 意图 | 特征 | 路由 |
+路由：
+
+| 意图 | 后续流程 |
+|---|---|
+| 指标值/趋势/对比 | Stage 1 至 Stage 7 全流程 |
+| 指标目录/定义 | Stage 1 至 Stage 5，展示 RealModel 精简指标目录 |
+| 字段查询 | 使用 `getLogicEntityDefineInfo` 的 fields；不要把定义指标用于生产查数 |
+| 结构浏览 | `getModelTree` / `locateNode`，不下钻查数 |
+
+## Stage 1：Phase A 节点定位
+
+1. 将抽取出的 `business_object` **原样优先**传给 `locateNode`。例如“推广业务”直接调用
+   `locateNode("推广业务")`，用于验证服务端 alias，不要先由 Agent 改写成“广告”。
+2. 只保留点分 ID 的分类节点。
+3. 广义查询做最小覆盖根剪枝：若 B 以 `A + "."` 开头，保留 A、删除 B。
+4. 具体查询选名称/别名最贴合的节点，不额外加入祖先。
+5. 多个候选无法唯一确定时追问。
+6. 仅在 alias 未命中时，才使用 Agent 中英同义改写兜底，并明确说明发生了兜底。
+
+`getNextLevelNode` 会递归覆盖后代，因此每个剪枝后的节点只调用一次。
+
+## Stage 2：获取逻辑实体
+
+1. 调 `getNextLevelNode(categoryId, "CATEGORY")`。
+2. 使用 `publishedData` 中的真实实体 `id`、`nameCn/nameEn`、`parentOperObjId`。
+3. 按用户对象与实体名称相关性收敛。广告演示应找到“广告测试实体”。
+4. 多个实体都可能包含目标指标时，逐个获取精简 RealModel；多个高置信结果必须追问。
+5. 实体过多时先排序/截断或请用户确认，禁止不加控制地批量调用。
+
+## Stage 3：获取已部署指标
+
+对候选实体调用：
+
+```text
+getLogicEntityRealModel(logicEntityId)
+```
+
+只读取 Agent 可见的精简字段：指标 `id`、`nameCn`、`nameEn`、`description`、`unit`、
+`type`、`level`（后五项按实际存在使用）。
+
+规则：
+
+1. 生产查数只使用 RealModel 指标。
+2. `getLogicEntityDefineInfo` 仅用于字段查询、测试或排查，不作为生产指标来源。
+3. RealModel 指标 ID 必须原样保存，禁止拼接。
+4. 若工具仍返回巨型对象，停止继续批量调用并报告 Swagger 投影未生效。
+
+## Stage 4：Phase B Metric Family 匹配
+
+### 通用规则
+
+1. 先用 family aliases 识别指标族，再在本实体指标中找直接指标。
+2. `nameCn` 优先，`nameEn` 次之，`description` 只用于消歧。
+3. 保留平均/最小/最大、P95/P99、次数/比率等限定词。
+4. 唯一高置信候选可选用；多个候选必须追问；没有对应变体则报告未找到。
+
+### MVP families
+
+| 用户说法 | family/variant | RealModel 匹配 |
 |---|---|---|
-| A. 指标定义查询 | 「找 X 的指标」「X 有哪些指标」 | Stage 1 → 6 完整流程 |
-| B. 指标筛选查询 | 「X 的黄金指标」「X 的复合指标」——带级别/类型等限定词 | 同 A，但 Stage 5.5 必须执行筛选 |
-| C. 指标数值/趋势查询 | 「近一个月 X 的日活趋势」——要**数值**或**图** | 当前工具只有指标**定义**，无时序数值。执行 A 流程找到对应指标定义并返回，同时**明确告知**：数值查询能力尚未接入，先给出该指标的定义信息；呈现规范见 output-format.md 的图表章节（数值源接入后启用） |
-| D. 结构浏览 | 「有哪些分类」「模型树长什么样」 | 用 `getModelTree` / `locateNode` 返回结构，不下钻实体 |
-| E. 字段查询 | 「X 有哪些字段」 | 同 A 流程，但 Stage 5 提取 `fields` 而非 `metrics` |
-| F. 与数据模型无关 | 闲聊、其他任务 | 不使用本 skill |
+| 成功率、成功占比、接口成功率 | `success_rate` | 名称含成功率 / `success_rate` |
+| 平均时延、平均延迟 | `latency.avg_latency` | 名称含平均时延/平均延迟 |
+| 最小内存使用率、最低内存占用率 | `memory_usage_rate.min` | 名称含最小/最低 + 内存 + 使用率 |
+| 最大内存使用率、最高内存占用率 | `memory_usage_rate.max` | 名称含最大/最高 + 内存 + 使用率 |
 
-多意图组合（如「黄金指标的趋势」）按 B + C 叠加处理。
+成功率特别规则：
 
-### Stage 1 · 概念抽取 + 语义增强
+1. 直接“成功率”存在时，使用其 ID。
+2. “成功次数 / 请求次数”只是公式候选；直接指标存在时不要重算。
+3. 只有公式候选时先确认口径，还要确认两次查询结果的时间粒度可以对齐。
+4. 成功次数、请求次数、成功率不是同一个指标。
 
-1. 从用户问题中抽取**目标概念**和**粒度**：
-   - 广义概念（如「小艺」）→ 后面要覆盖它名下所有内容。
-   - 具体对象（如「小艺_翻译」）→ 只锁定该节点，别扩到父级。
-2. 同时抽取**筛选条件**（级别、类型等限定词，如「黄金」「复合」），留给 Stage 5.5 使用；条件词→字段值的映射见 output-format.md。
-3. **语义增强**：为概念生成同义/近义候选词（如「小艺 / Celia」「存储 / 储存 / storage」）。中英都考虑。
-4. 得到一组关键词候选，进入定位。
+负向规则：
 
-### Stage 2 · 定位候选节点
+- P95/P99 不能用平均时延代替。
+- 最小值不能用最大值代替。
+- 使用率不能用使用量代替。
+- 点击率、曝光率不能用成功率代替。
 
-- 对每个关键词调用 `locateNode(keyword)`，合并所有返回节点为候选集。
-- **只保留分类节点（点分 ID）** 用于后续导航；UUID 实体节点先忽略（它们会在 Stage 4 被自然覆盖到）。
-- 若用户没给明确概念、需要先了解有哪些顶层分类，才用 `getModelTree()` 兜底浏览。
+## Stage 5：指标元数据筛选
 
-### Stage 3 · 节点筛选与去重（最关键，防重复/防爆量）
+用户明确要求等级或类型时，才应用 `level/type` 过滤；语义映射见
+[references/output-format.md](references/output-format.md)。字段不存在时说明无法可靠过滤，不要猜。
 
-先按**用户粒度**决定策略：
+过滤必须发生在候选指标匹配期间，不能先选一个指标再假装它符合条件。
 
-- **广义查询（要覆盖整个概念）**：做「**最小覆盖根**」剪枝——
-  - 在候选分类 ID 集合中，**若某节点的 ID 是另一节点 ID 的后代（前缀关系），删掉后代，只留祖先**。
-  - 依据：`getNextLevelNode` 是递归的，查祖先已完全覆盖后代，再查后代必然产生重复数据。
-  - 例：候选 `...CEL`、`...CEL.AIVision`、`...CEL.AIVision.celia_photo_editing` → 只保留 `...CEL`（小艺）。
+## Stage 6：时间解析与真实查数
 
-- **具体查询（只要某个具体对象）**：
-  - 选**名字与用户短语最贴合**的那个节点（优先精确/最长匹配），**只用它**，不要把它的父级祖先加进来（否则会把整个大类都拉出来）。
-  - 例：用户要「小艺_翻译」→ 选 `...CEL.AIVision.celia_translation` 这一个，忽略 `...CEL`。
+仅 `value/trend/comparison` 意图执行：
 
-- **多关键词去重**：语义增强产生的多个关键词若命中重叠节点，先合并再按上面规则剪枝，确保**每个最终节点只查一次**。
+1. 把用户时间表达转换成明确起止时间。
+2. “最近一个月”是截止当前时刻的滚动一个月；“上个月”是上一个自然月。
+3. 按工具实际格式和时区构造参数，并保存用于最终回显。
+4. 调用：
 
-剪枝后得到一个**去重的目标分类节点列表**。
+```text
+queryIndicatorDimensionData(metric.id, startTime, endTime)
+```
 
-### Stage 4 · 取逻辑实体
+5. 这里的 `id` 是 RealModel 的指标 ID，不是分类 ID 或逻辑实体 ID。
+6. 用户没给时间而接口要求必填时先追问。
+7. 工具返回空就报告空，不补零、不换近似指标、不使用假数据。
 
-- 对每个目标分类节点调 `getNextLevelNode(id, type="CATEGORY")`。
-- 汇总 `publishedData` 里的逻辑实体，保留每个实体的 `id` + `parentOperObjId` + 名称。
-- **按实体名与用户概念的相关性过滤**，去掉明显无关的（控制下一步调用量）。
-- **量控**：若实体数量很大（如 >20），先把实体清单（名称+ID）按相关性排序，优先处理最相关的若干个，避免一次性对全部实体取指标导致数据过载；必要时把清单先给用户确认。
+## Stage 7：呈现
 
-### Stage 5 · 取指标定义
+严格遵循 [references/output-format.md](references/output-format.md)。至少包含：
 
-- 对筛选后的每个逻辑实体调 `getLogicEntityDefineInfo(id, parentOperObjId)`。
-- 从 `publishedData.metrics` 提取指标；意图为字段查询（E）时提取 `publishedData.fields`。
+- 命中分类路径和逻辑实体。
+- 用户说法命中的 Metric Family 及真实指标名称。
+- 实际查询起止时间和时区。
+- `queryIndicatorDimensionData` 的真实返回摘要。
+- 必要口径说明；例如直接成功率存在，因此未用成功次数/请求次数重算。
 
-### Stage 5.5 · 条件筛选（意图 B 必须执行）
+单值直接展示；时间序列优先折线图；接口返回的聚合语义不得擅自改变。
 
-- 若 Stage 1 抽取到了筛选条件（如「黄金指标」），在**汇总后的指标列表**上执行过滤，再进入呈现。
-- 条件词到字段值的映射（如 黄金→`level=GOLD`）见 output-format.md 的「筛选条件语义映射」。匹配时**大小写不敏感**。
-- 若筛选后结果为空：报告「找到 N 个指标，但没有满足 <条件> 的」，并列出实际存在的 level/type 取值分布，方便用户改口。
-- 遇到映射表未覆盖的新说法：先按最接近的规范值猜测并**在回答中说明按什么条件过滤的**，避免静默用错条件。
+## 完整演示：Phase A + Phase B + 真实数据
 
-### Stage 6 · 汇总与呈现
+用户：
 
-**严格遵循 [references/output-format.md](references/output-format.md)。** 核心要求：
+```text
+最近一个月推广业务的成功占比是多少？
+```
 
-- 指标默认返回字段：`measureType`、`nameCn`、`nameEn`、`description`、`type`、`level`、`tag`；某字段在**全部结果中都为空**则整列省略。用户明确指定要哪些字段时以用户为准。
-- 用 **Markdown 表格**呈现指标列表，按「分类路径 → 逻辑实体」分组，每个实体一张表。
-- 表格上方给出**关键信息头**：命中路径、实体名、指标总数、筛选条件（如有）。
-- 涉及趋势/数值的图表呈现（意图 C，数值源接入后启用）按 output-format.md 的图表章节执行。
-- 若结果为空，明确说明「未找到 X 相关节点/实体/指标」，并建议换个说法（触发语义增强重试）。
+执行：
 
-### Stage 7 · 未来扩展(预留,现在不实现)
+1. 抽取 `business_object=推广业务`、`metric_phrase=成功占比`、`time=最近一个月`。
+2. `locateNode("推广业务")`，由 Phase A alias 命中广告节点。
+3. `getNextLevelNode`，找到“广告测试实体”。
+4. `getLogicEntityRealModel`，获得六个真实指标的精简目录。
+5. Phase B 把“成功占比”识别为 `success_rate`。
+6. 唯一选中“广告接口成功率”，使用其真实 `id`；不选成功次数或请求次数。
+7. 转换最近一个月为明确起止时间。
+8. `queryIndicatorDimensionData(id, startTime, endTime)`。
+9. 展示真实结果、实际时间和口径说明。
 
-- **取指标数值 / 时间筛选**（如「最近一个月的小艺指标」）：待指标数据源接入后，在 Stage 5.5 之后加「查数值」步骤；时间/条件筛选发生在查数值那一步。
-- **意图分类细化**：随接入能力增加，在 Stage 0 扩充意图类型和路由。
-- **接入其他数据库**：新数据源以新增 reference + Stage 0 路由分支的方式扩展，主流程不动。
+## 禁止事项
 
-## 通用规则
-
-- **层级判断只用点分 ID 前缀**，不用 `locateNode` 的 `depth`（该字段目前不可靠）。
-- **每个目标节点只调一次 `getNextLevelNode`**，靠 Stage 3 剪枝保证；严禁对祖先和后代节点都调用。
-- **`getLogicEntityDefineInfo` 的两个入参（`id`、`parentOperObjId`）都来自 `getNextLevelNode` 的返回**，不要自己拼。
-- **控量优先**：任何一步预感数据量大时，先收敛（过滤/排序/截断/向用户确认），再深入，避免上下文过载。
-- 找不到就如实说 + 建议换词，不要编造节点、ID 或指标。
-
-## 完整示例（「给我所有小艺的黄金指标」）
-
-1. **Stage 0**：意图 = B（指标筛选查询），筛选条件 =「黄金」。
-2. **Stage 1**：概念=「小艺」，粒度=广义；增强候选=[小艺, Celia]；条件映射：黄金 → `level=GOLD`。
-3. **Stage 2**：`locateNode("小艺")` → 得到 `...CEL`（小艺）、`...CEL.AIVision` 等。
-4. **Stage 3**：最小覆盖根剪枝 → 只留 `business_and_platform.CEL`。
-5. **Stage 4**：`getNextLevelNode("business_and_platform.CEL", "CATEGORY")` → 小艺及其所有子分类下的逻辑实体。
-6. **Stage 5**：对相关实体逐个 `getLogicEntityDefineInfo(id, parentOperObjId)` → 提取 `metrics`。
-7. **Stage 5.5**：过滤 `level == GOLD`（大小写不敏感）。
-8. **Stage 6**：按 output-format.md 分组出表：路径 + 实体信息头，指标表格含默认字段（全空列省略），并注明「筛选条件：level=GOLD（黄金指标）」。
+1. 不让 Agent 自由联想替代 Phase A 或 Phase B；自由语义增强仅作显式兜底。
+2. 不执行 SQL，不从 RealModel 猜 SQL。
+3. 不自行构造节点、实体或指标 ID。
+4. 不用本地假数据补充真实数据库。
+5. 不在多个高置信候选中静默选择。
+6. 不对祖先和后代分类重复调用 `getNextLevelNode`。
+7. 不把相似但不同的指标口径互相替代。

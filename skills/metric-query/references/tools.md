@@ -79,16 +79,34 @@
 
 ## getLogicEntityRealModel
 
-**作用**：返回逻辑实体的实时模型。
+**作用**：返回逻辑实体的已部署指标精简目录，供 Agent 选择真实指标 ID。
 
 | 项 | 说明 |
 |---|---|
 | 入参 | `id`（string，必填）：逻辑实体 UUID |
-| 出参 | 当前恒为空对象 |
+| 出参 | 逻辑实体基本标识和已部署指标数组；指标至少含 `id` / `nameCn`，并可含 `nameEn` / `description` / `unit` / `type` / `level` |
 
 要点：
 
-- **暂不可用**（后端返回空），不要调用。保留在此仅作登记。
+- 该接口已可访问数据库，但原始响应很大；安装工具使用的 Swagger 2.0 schema 应只投影上述必要字段。
+- 指标 `id` 是后续 `queryIndicatorDimensionData` 的入参，必须原样使用，禁止自行拼接。
+- 如果返回仍包含大量无关对象，说明 Swagger 投影可能未生效，应先停止批量调用并修复工具配置。
+
+## queryIndicatorDimensionData
+
+**作用**：按真实指标 ID 和起止时间查询指标数据。
+
+| 项 | 说明 |
+|---|---|
+| 入参 | 指标 `id`、查询开始时间、查询结束时间；参数名称和时间格式以已安装工具为准 |
+| 出参 | 该指标在时间范围内的真实数据，可能是单值、时间序列或空结果 |
+
+要点：
+
+- `id` 必须来自本次 `getLogicEntityRealModel` 返回的指标项，不是分类 ID 或逻辑实体 ID。
+- 开始和结束时间都必须明确，并在最终回答中回显实际范围和时区。
+- 不改变接口返回的聚合含义，不自行编造总值、平均值或趋势。
+- 返回为空时如实报告空结果，不使用本地假数据补齐。
 
 ## 典型调用链
 
@@ -96,5 +114,7 @@
 locateNode(关键词)                    # 定位候选分类节点
   └─> [Stage 3 剪枝：最小覆盖根 / 最贴合节点]
         └─> getNextLevelNode(分类id, CATEGORY)          # 取逻辑实体（递归覆盖后代）
-              └─> getLogicEntityDefineInfo(实体id, parentOperObjId)   # 取指标定义
+              └─> getLogicEntityRealModel(实体id)       # 取已部署指标精简目录
+                    └─> [Metric Family 匹配真实指标id]
+                          └─> queryIndicatorDimensionData(指标id, 开始时间, 结束时间)
 ```

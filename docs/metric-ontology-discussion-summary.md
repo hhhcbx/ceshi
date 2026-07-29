@@ -397,3 +397,80 @@ business_and_platform.ADV.AdvertiserRebate.pps_click
 9. 测试数据可先合理编造，包括广告接口成功率、广告接口最小内存使用率、广告接口平均时延、广告接口成功次数、广告接口最大内存使用率、广告接口请求次数等。
 10. 对问题“最近一个月广告成功率是多少？”，Layer 1 负责定位广告节点，Layer 2 负责识别 `success_rate` 指标族，并在候选指标中优先找到直接指标“广告接口成功率”，同时识别公式候选“广告接口成功次数 / 广告接口请求次数”。用户已明确成功率=成功次数/请求次数，因此测试期可使用公式口径但必须解释。
 11. 本轮新增 `docs/metric-family-ontology-mvp.md`，作为像 `locatenode-ontology-mvp.md` 一样面向弱 Agent 的 Layer 2 构建指导文档。
+
+---
+
+## 15. 2026-07-29 对齐：用真实 RealModel 和 queryIndicatorDimensionData 完成 Phase A + Phase B 展示闭环
+
+本轮用户提供了此前缺失的真实查数现状，并要求同时更新代码侧弱 Agent 文档、讨论总结和云端 Agent Skill。以下内容为本轮追加记录，不回改前文历史结论。
+
+### 15.1 新确认的真实数据和接口能力
+
+1. 数据库已经可以访问，不再处于“只能做本地 matcher、不能真实查数”的阶段。
+2. 当前只有一个可用于展示的真实逻辑数据实体，位于广告节点下，名称为“广告测试实体”。
+3. “广告测试实体”下有六个真实指标：广告接口成功率、广告接口最小内存使用率、广告接口平均时延、广告接口成功次数、广告接口最大内存使用率、广告接口请求次数。
+4. 因为真实指标已经存在，上一版设计的本地假数据 `resources/ontology/metric-shelf/test-data/advertising-metrics.yaml` 不再需要，也不应继续作为验收依据。
+5. `getLogicEntityRealModel` 现在能够访问真实数据库数据，不再是空对象；生产指标目录继续以该接口为准。
+6. `getLogicEntityRealModel` 的原始响应量很大，直接全部返回给 Agent 会占用大量上下文并干扰指标匹配。
+7. 后端接口本身不能修改，但可以调整安装工具时使用的 Swagger 2.0 YAML，通过响应 schema/字段投影控制 Agent 实际看到的信息。
+8. 从 `getLogicEntityRealModel` 筛选出目标指标后，只需要把该指标真实 `id` 和查询起止时间传给 `queryIndicatorDimensionData`，即可获得真实指标数据。
+9. 当前 Agent 不需要读取或改写 SQL；真实查数入口已经明确为 `queryIndicatorDimensionData`。
+
+### 15.2 完整展示链路
+
+本轮将演示闭环确定为：
+
+```text
+用户问题
+  -> Phase A：aliases-only locateNode 定位分类节点
+  -> getNextLevelNode 找到“广告测试实体”
+  -> getLogicEntityRealModel 返回精简后的六个真实指标
+  -> Phase B：Metric Family 将用户指标说法映射到真实指标
+  -> 取得真实 metric.id
+  -> queryIndicatorDimensionData(metric.id, startTime, endTime)
+  -> 云端 Agent 展示真实值或真实空结果
+```
+
+为了同时明确展示 Phase A 和 Phase B 的作用，主演示问题调整为：
+
+```text
+最近一个月推广业务的成功占比是多少？
+```
+
+这里：
+
+1. `推广业务` 不是广告节点标准名，通过广告节点 `base.yaml` 的 alias 命中广告，展示 Phase A 的价值。
+2. `成功占比` 不是“广告接口成功率”的标准名，通过 `success_rate` Metric Family alias 命中成功率口径，展示 Phase B 的价值。
+3. Phase B 在六个真实指标中选择直接指标“广告接口成功率”，而不是误选成功次数、请求次数、平均时延或内存使用率。
+4. 选中后使用 RealModel 返回的真实指标 ID 调 `queryIndicatorDimensionData`。
+5. 最终回答必须回显真实指标名称、实际查询起止时间、时区和接口真实返回；返回为空时不能补假数据。
+
+### 15.3 Swagger 2.0 投影决策
+
+1. 不修改 `getLogicEntityRealModel` 或 `queryIndicatorDimensionData` 的接口实现、URL 或参数。
+2. 在安装工具使用的 Swagger 2.0 YAML 中，将 RealModel 的 Agent 可见响应裁剪为完成决策所需的最小字段。
+3. 最少必须保留指标 `id` 和 `nameCn`；建议保留 `nameEn`、`description`、`unit`、`type`、`level`，以及逻辑实体的 `id/nameCn/nameEn`。
+4. 指标 `id` 必须明确描述为 `queryIndicatorDimensionData` 的入参，禁止 Agent 自行构造，也不能误传分类 ID 或逻辑实体 ID。
+5. Swagger schema 示例只是目标投影形状。弱 Agent 必须先对齐现有接口真实 JSON 路径，不能为了符合文档示例去修改接口。
+6. 重新安装工具后必须实测投影是否生效。如果生成平台仍把未声明的大字段交给 Agent，单改 schema 并未真正解决控量问题，不能直接宣布完成。
+7. `queryIndicatorDimensionData` 的 Swagger 描述要明确指标 ID 的来源、开始和结束时间的含义与真实格式；参数名称和位置仍以现有接口为准。
+
+### 15.4 Metric Family 和匹配决策
+
+1. Metric Family 仍然独立于节点 `base.yaml`，集中维护在 `resources/ontology/metric-shelf/metric-families.yaml`。
+2. `metric-families.yaml` 不复制数据库指标清单，也不保存任何环境相关的真实指标 ID。
+3. 第一版用当前六个真实指标验收 `success_rate`、`latency.avg_latency`、`memory_usage_rate.min/max`。
+4. `success_rate` 应包含“成功率、成功占比、接口成功率”等 aliases。
+5. 直接成功率指标存在时必须优先查询直接指标；“成功次数 / 请求次数”只作为口径解释和直接指标缺失时的公式候选。
+6. 当前 `queryIndicatorDimensionData` 是按单一指标 ID 查询，因此只有公式候选时，除了确认公式，还必须确认分子分母返回的时间粒度能够对齐，不能把两个不明聚合语义的值随意相除。
+7. 平均/最小/最大、P95/P99、次数/比率等限定词不可在归一化时丢失。
+8. 负向测试必须覆盖：P95 时延不能用平均时延代替、最小内存不能用最大内存代替、成功次数不能用成功率代替、多个高置信候选必须追问。
+9. 广告只是当前唯一真实验收数据，不是架构边界。其他业务后续仍复用“节点 aliases -> RealModel 动态指标 -> 通用 Metric Family -> 按 ID 查数”的同一链路。
+
+### 15.5 本轮文档调整
+
+1. 重写 `docs/metric-family-ontology-mvp.md`，从“本地假数据 matcher 方案”升级为面向代码侧弱 Agent 的真实数据、Swagger 投影、接口联调和完整展示实施方案。
+2. 重写 `docs/agent-realmodel-query-rules.md`，明确云端 Agent 从 Phase A 到 Phase B，再到 `queryIndicatorDimensionData` 的生产调用规程。
+3. 更新 `skills/metric-query/SKILL.md`，将数值/趋势查询从“未来预留”改为当前可执行能力，并加入完整广告演示、匹配规则、时间规则和失败边界。
+4. 更新 `skills/metric-query/references/tools.md`，纠正 RealModel “恒为空、不要调用”的过时说明，并登记 `queryIndicatorDimensionData`。
+5. 更新 `skills/metric-query/references/output-format.md`，启用真实数值/趋势输出规范，明确单值、时间序列和空结果的展示方式。

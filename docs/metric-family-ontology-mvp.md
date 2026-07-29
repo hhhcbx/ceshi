@@ -1,126 +1,92 @@
-# Metric Family 本体 Layer 2 MVP 构建方案
+# Metric Family 本体 Layer 2：真实数据展示流程实施方案
 
 ## 1. 文档定位
 
-本文写给 **Java 代码侧弱 Agent / 工程实现者**，用于指导在 databp Java 工程中构建 Layer 2：指标口径本体 / Metric Family 本体。
-
-它和 `docs/locatenode-ontology-mvp.md` 的关系是：
-
-1. `locatenode-ontology-mvp.md` 负责 Layer 1：节点别名语义层，用 `base.yaml` 里的 `aliases` 把用户业务词映射到货架分类节点 ID。
-2. 本文负责 Layer 2：指标族和指标口径语义层，把用户说的“成功率、时延、内存使用率”等指标短语映射到一套可复用的指标匹配与口径规则。
-3. 本阶段暂不解决真实查数和 SQL 执行，只做本地可测的指标匹配、口径识别、公式候选和消歧输出。
-
-## 2. 先回答核心问题：Metric Family 应该写在哪里
-
-不要把 Metric Family 直接写进每个节点的 `base.yaml` 后面。
-
-### 2.1 每个 base.yaml 是什么
-
-可以达成这个共识：
+本文写给 **databp Java 代码侧弱 Agent / 工程实现者**。目标是在不新增、
+不修改后端接口的前提下，把已经可访问的真实数据库数据串成一个可演示闭环：
 
 ```text
-resources/DataModel 中每个节点目录下的 base.yaml
-≈ 货架树上一个节点对应的节点本体文件
+用户问题
+  -> Phase A：aliases-only locateNode 定位广告节点
+  -> 找到“广告测试实体”
+  -> getLogicEntityRealModel 返回精简后的真实指标目录
+  -> Phase B：Metric Family 识别成功率口径并选中真实指标 ID
+  -> queryIndicatorDimensionData(id, startTime, endTime)
+  -> 云端 Agent 展示真实结果
 ```
 
-在这个节点本体里：
+本文负责代码侧资源、Swagger 2.0 投影和联调验收；云端 Agent 的调用顺序见
+`docs/agent-realmodel-query-rules.md` 和 `skills/metric-query/SKILL.md`。
 
-1. `id` 是节点稳定标识。
-2. `parent_category_id` 是节点之间的父子关系属性。
-3. `name_cn` / `name_en` 是节点名称属性。
-4. `description` 是节点描述属性。
-5. `aliases` 是节点别名属性，用于 Layer 1 的 locateNode 匹配。
+## 2. 已确认现状与约束
 
-所以，`aliases/id/name` 都可以理解成“这个节点本体的属性”。
+1. 广告节点下已有真实逻辑数据实体，名称为“广告测试实体”。
+2. 该实体有六个真实指标：广告接口成功率、广告接口最小内存使用率、广告接口平均时延、
+   广告接口成功次数、广告接口最大内存使用率、广告接口请求次数。
+3. `getLogicEntityRealModel` 已能访问数据库，但原始返回量很大。
+4. `queryIndicatorDimensionData` 已能查数；选中指标后，只需提供指标 `id`、查询开始时间和结束时间。
+5. 可以修改用于安装工具的 Swagger 2.0 YAML，包括 Agent 可见的响应 schema 和字段说明；不能修改接口实现、
+   URL、参数或实际响应。
+6. 不再创建本地假指标数据。测试必须使用上述真实逻辑实体、真实指标 ID 和真实查询结果。
 
-### 2.2 Metric Family 为什么不放进每个节点 base.yaml
+## 3. Phase A 与 Phase B 的职责
 
-Metric Family 不是某个单一货架节点的属性，而是一类跨节点复用的指标口径概念。
+### 3.1 Phase A：节点本体
 
-例如“成功率”：
+每个节点目录中的 `base.yaml` 是一个节点本体文件。`id`、`parent_category_id`、
+`name_cn`、`name_en`、`description` 和 `aliases` 都是这个节点的属性。
 
-1. 广告节点可能有成功率。
-2. 小艺节点可能有成功率。
-3. 搜索节点可能有成功率。
-4. 支付节点可能有成功率。
-5. 成功率的通用口径通常都是 `成功次数 / 请求次数` 或优先匹配直接 `成功率` 指标。
-
-如果把这套规则写进每个节点的 `base.yaml`，会出现问题：
-
-1. 同一套成功率规则被复制很多份。
-2. 规则改动时要改很多节点，容易不一致。
-3. 节点本体和指标族本体混在一起，职责不清。
-4. 后续扩展时会越来越像手工知识库，而不是语义层。
-
-因此 Layer 2 应该新增独立 YAML，例如：
+Phase A 只解决：
 
 ```text
-resources/ontology/metric-shelf/metric-families.yaml
+用户对业务对象的说法 -> 真实货架分类节点
 ```
 
-### 2.3 节点 base.yaml 与 Metric Family 的关系
+广告节点的最小示例仍为：
 
-节点 `base.yaml` 只回答：
+```yaml
+id: business_and_platform.ADV
+parent_category_id: business_and_platform
+name_cn: 广告
+name_en: Advertising
+description: 广告业务大类。
+aliases:
+  - 广告
+  - ads
+  - ad
+  - 推广
+  - 广告业务
+```
+
+因此演示问题可以故意使用货架名称之外的说法，例如：
 
 ```text
-用户说的业务对象是什么节点？
+最近一个月推广业务的接口成功率是多少？
 ```
 
-`metric-families.yaml` 回答：
+`推广业务` 通过 `aliases` 命中广告节点，能够直接展示 Phase A 的收益。不要让云端 Agent
+自行把“推广业务”猜成“广告”来掩盖 `locateNode` 是否生效。
 
-```text
-用户说的指标口径是什么意思？
-在候选指标列表里应该怎么匹配？
-直接指标、公式指标、相似但不等价指标如何区分？
-```
+### 3.2 Phase B：指标族本体
 
-两者组合：
-
-```text
-用户问题：最近一个月广告成功率是多少？
-
-Layer 1：广告 -> business_and_platform.ADV... -> 找到广告相关逻辑实体
-Layer 2：成功率 -> success_rate metric family -> 在实体指标中匹配直接指标或公式候选
-```
-
-## 3. Layer 2 的 MVP 目标
-
-本阶段目标不是查真实数，而是构建一个本地可测的指标口径识别器。
-
-输入：
-
-```text
-metric_phrase: 用户问题中的指标短语，例如“广告成功率”
-metrics: 某个逻辑实体下的候选指标列表
-```
-
-输出：
-
-```text
-1. 命中的 metric family，例如 success_rate。
-2. 直接指标候选，例如“广告接口成功率”。
-3. 公式候选，例如“广告接口成功次数 / 广告接口请求次数”。
-4. 相关但不等价的候选，例如“曝光率、点击率”等。
-5. 是否需要追问或确认。
-```
-
-本阶段不做：
-
-1. 不查 RealModel 真实 SQL。
-2. 不执行 SQL。
-3. 不返回真实指标值。
-4. 不把所有业务指标逐条写进本体。
-5. 不只服务广告，要设计成所有节点/业务都可复用。
-
-## 4. metric-families.yaml 建议结构
-
-建议新增：
+Metric Family 不写入广告节点的 `base.yaml`。它是跨业务节点复用的指标口径，继续独立存放：
 
 ```text
 resources/ontology/metric-shelf/metric-families.yaml
 ```
 
-第一版结构：
+Phase B 解决：
+
+```text
+用户指标短语 -> 指标族/变体 -> RealModel 中的真实指标 ID
+```
+
+Phase B 不保存指标值，也不复制数据库中的指标目录。RealModel 是真实指标目录，
+`metric-families.yaml` 只保存稳定的语义规则。
+
+## 4. Metric Family 最小配置
+
+第一版只配置本次真实数据可以验收的三个指标族：
 
 ```yaml
 version: 1
@@ -128,459 +94,263 @@ version: 1
 metric_families:
   - id: success_rate
     name_cn: 成功率
-    name_en: Success Rate
-    aliases:
-      - 成功率
-      - 成功占比
-      - 接口成功率
-      - success rate
-      - success_rate
+    aliases: [成功率, 成功占比, 接口成功率, success_rate, success rate]
     direct_metric:
-      name_contains:
-        - 成功率
-        - success_rate
-      prefer: true
+      name_contains: [成功率, success_rate]
     formula:
       expression: numerator / denominator
       numerator:
-        aliases:
-          - 成功次数
-          - 成功量
-          - 成功请求数
-          - success count
-          - success_count
-        name_contains:
-          - 成功次数
-          - 成功量
-          - success_count
+        name_contains: [成功次数, 成功量, success_count]
       denominator:
-        aliases:
-          - 请求次数
-          - 请求量
-          - 总请求数
-          - request count
-          - request_count
-        name_contains:
-          - 请求次数
-          - 请求量
-          - request_count
-      require_confirmation: false
-    not_equivalent_to:
-      - exposure_rate
-      - click_rate
+        name_contains: [请求次数, 请求量, request_count]
     decision_policy:
-      if_direct_metric_exists: use_direct_metric
-      if_only_formula_exists: use_formula_with_explanation
-      if_multiple_direct_metrics: ask_user_to_disambiguate
-      if_no_direct_or_formula: report_not_found
+      if_one_direct: use_direct
+      if_multiple_direct: ask_user
+      if_no_direct_but_formula_complete: use_formula_after_confirmation
+      if_no_match: report_not_found
 
   - id: latency
     name_cn: 时延
-    name_en: Latency
-    aliases:
-      - 时延
-      - 延迟
-      - 耗时
-      - latency
-      - rt
-    direct_metric:
-      name_contains:
-        - 时延
-        - 延迟
-        - 耗时
-        - latency
-        - rt
-      prefer: true
+    aliases: [时延, 延迟, 耗时, latency, rt]
     variants:
       - id: avg_latency
-        aliases:
-          - 平均时延
-          - 平均延迟
-          - avg latency
-          - average latency
-        name_contains:
-          - 平均时延
-          - 平均延迟
-          - avg_latency
-      - id: min_latency
-        aliases:
-          - 最小时延
-          - 最小延迟
-          - min latency
-        name_contains:
-          - 最小时延
-          - 最小延迟
-          - min_latency
-      - id: p95_latency
-        aliases:
-          - p95 时延
-          - p95 延迟
-          - p95 latency
-        name_contains:
-          - p95
-          - P95
+        aliases: [平均时延, 平均延迟, average latency, avg_latency]
+        name_contains: [平均时延, 平均延迟, avg_latency]
 
-  - id: memory_usage
+  - id: memory_usage_rate
     name_cn: 内存使用率
-    name_en: Memory Usage
-    aliases:
-      - 内存使用率
-      - 内存占用
-      - 内存
-      - memory usage
-      - memory
-      - mem
-    direct_metric:
-      name_contains:
-        - 内存使用率
-        - 内存占用
-        - memory_usage
-        - memory
-        - mem
-      prefer: true
+    aliases: [内存使用率, 内存占用率, memory usage, memory_usage]
     variants:
-      - id: min_memory_usage
-        aliases:
-          - 最小内存使用率
-          - 最小内存占用
-          - min memory usage
-        name_contains:
-          - 最小内存
-          - min_memory
-      - id: max_memory_usage
-        aliases:
-          - 最大内存使用率
-          - 最大内存占用
-          - max memory usage
-        name_contains:
-          - 最大内存
-          - max_memory
+      - id: min_memory_usage_rate
+        aliases: [最小内存使用率, 最低内存使用率, min memory usage]
+        name_contains: [最小内存使用率, 最低内存使用率, min_memory]
+      - id: max_memory_usage_rate
+        aliases: [最大内存使用率, 最高内存使用率, max memory usage]
+        name_contains: [最大内存使用率, 最高内存使用率, max_memory]
 ```
 
-说明：
+关键规则：
 
-1. `metric_families[*].id` 是指标族 ID，不是货架节点 ID。
-2. 指标族 ID 只在 `metric-families.yaml` 内使用，不写回节点 `base.yaml`。
-3. `aliases` 用于把用户说法映射到指标族。
-4. `direct_metric.name_contains` 用于在候选指标列表中查直接指标。
-5. `formula` 用于定义无法或不优先使用直接指标时的公式候选。
-6. `not_equivalent_to` 用于说明相关但不能互相替代的指标族。
-7. `decision_policy` 用于让弱 Agent/云端 Agent 知道遇到候选时怎么处理。
+1. `success_rate` 是通用指标族，不命名为 `advertising_success_rate`。
+2. 真实指标 ID 不写入配置；不同环境的 ID 由 RealModel 动态返回。
+3. 用户问“成功占比”时，先通过 family alias 识别 `success_rate`，再从六个真实指标中选中
+   “广告接口成功率”。这体现 Phase B，而不是只靠名称完全相等。
+4. 已有直接成功率指标时，查询它的 ID，不要同时查询成功次数和请求次数后自行重算。
+5. 成功次数/请求次数只作为口径解释和直接指标缺失时的公式候选。
+6. 平均、最小、最大是不能丢失的变体约束；不能把平均时延匹配成任意时延，
+   也不能把最小内存使用率匹配成最大内存使用率。
 
-## 5. 本地测试指标数据
+## 5. 对 `getLogicEntityRealModel` 做 Swagger 投影
 
-本阶段可以先用本地假数据测试，不依赖真实 RealModel。
+### 5.1 为什么改 Swagger，而不是改接口
 
-建议测试数据文件：
+后端 RealModel 返回保持不变。Swagger 2.0 文件只向云端 Agent 暴露完成匹配所需的字段，
+避免大对象全部进入上下文。这个动作是 **工具契约投影**，不是更改业务接口或数据库。
 
-```text
-resources/ontology/metric-shelf/test-data/advertising-metrics.yaml
-```
+### 5.2 Agent 最少需要看到什么
 
-示例：
+对 RealModel 的响应定义，只保留：
+
+| 字段 | 是否必需 | 用途 |
+|---|---|---|
+| 逻辑实体 `id` | 建议 | 追踪本次匹配来自哪个实体 |
+| 逻辑实体 `nameCn` / `nameEn` | 建议 | 确认“广告测试实体”并用于展示 |
+| 指标 `id` | 必需 | 传给 `queryIndicatorDimensionData` |
+| 指标 `nameCn` | 必需 | 中文匹配和展示 |
+| 指标 `nameEn` | 建议 | 英文/编码名匹配 |
+| 指标 `description` | 建议 | 同名指标消歧和口径解释 |
+| 指标 `unit` | 建议 | 结果展示和公式安全判断 |
+| 指标 `type` / `level` | 可选 | 用户明确按类型或等级筛选时使用 |
+
+不要向 Agent 暴露与本次决策无关的大块建模信息、内部关系对象、编辑态元数据或重复结构。
+尤其不要因为原始对象里存在 SQL 等实现细节，就要求 Agent 解析或改写 SQL；当前查数入口是
+`queryIndicatorDimensionData`。
+
+### 5.3 Swagger 2.0 schema 示例
+
+下面只给出响应定义的目标形状。弱 Agent 必须先查看现有 Swagger 中 RealModel 的实际字段路径，
+将 `properties` 对齐到真实 JSON；不得为了符合示例而修改接口。
 
 ```yaml
-logic_entity:
-  id: mock-advertising-interface-entity
-  name_cn: 广告接口测试实体
-  category_id: business_and_platform.ADV.AdvertiserRebate.pps_click
+definitions:
+  AgentVisibleRealModel:
+    type: object
+    description: 逻辑实体及其已部署指标的精简视图；用于选择查询指标 ID。
+    properties:
+      id:
+        type: string
+        description: 逻辑实体 ID。
+      nameCn:
+        type: string
+        description: 逻辑实体中文名。
+      nameEn:
+        type: string
+        description: 逻辑实体英文名。
+      metrics:
+        type: array
+        description: 已部署且可用于真实查数的指标目录。
+        items:
+          $ref: '#/definitions/AgentVisibleMetric'
 
-metrics:
-  - id: ad_interface_success_rate
-    name_cn: 广告接口成功率
-    name_en: ad_interface_success_rate
-    level: GOLD
-    type: DERIVED
-    data_source: SERVER
-    unit: ratio
-
-  - id: ad_interface_min_memory_usage
-    name_cn: 广告接口最小内存使用率
-    name_en: ad_interface_min_memory_usage
-    level: HEALTH
-    type: BASIC
-    data_source: SERVER
-    unit: percent
-
-  - id: ad_interface_avg_latency
-    name_cn: 广告接口平均时延
-    name_en: ad_interface_avg_latency
-    level: GOLD
-    type: BASIC
-    data_source: SERVER
-    unit: ms
-
-  - id: ad_interface_success_count
-    name_cn: 广告接口成功次数
-    name_en: ad_interface_success_count
-    level: NORMAL
-    type: BASIC
-    data_source: SERVER
-    unit: count
-
-  - id: ad_interface_max_memory_usage
-    name_cn: 广告接口最大内存使用率
-    name_en: ad_interface_max_memory_usage
-    level: HEALTH
-    type: BASIC
-    data_source: SERVER
-    unit: percent
-
-  - id: ad_interface_request_count
-    name_cn: 广告接口请求次数
-    name_en: ad_interface_request_count
-    level: NORMAL
-    type: BASIC
-    data_source: SERVER
-    unit: count
+  AgentVisibleMetric:
+    type: object
+    required: [id, nameCn]
+    properties:
+      id:
+        type: string
+        description: 指标真实 ID；原样传给 queryIndicatorDimensionData.id，禁止自行构造。
+      nameCn:
+        type: string
+        description: 指标中文名，用于 Metric Family 匹配。
+      nameEn:
+        type: string
+        description: 指标英文名或编码名。
+      description:
+        type: string
+        description: 指标口径描述；仅用于候选消歧和结果解释。
+      unit:
+        type: string
+        description: 指标单位。
+      type:
+        type: string
+        description: 指标类型；仅在真实响应存在时暴露。
+      level:
+        type: string
+        description: 指标等级；仅在真实响应存在时暴露。
 ```
 
-注意：
+如果生成工具的平台支持响应字段白名单或 schema 投影，应使用白名单。如果平台只是把 schema
+作为提示而仍把完整 HTTP body 交给 Agent，则单改 schema 不能真正减小返回体；必须在安装后实测工具输出，
+确认未声明的大字段确实没有进入 Agent 上下文。
 
-1. 这些属性是 MVP 测试用，可以合理编造。
-2. 后续接真实 RealModel 时，把字段适配到真实返回结构。
-3. 本地测试重点不是数值，而是“用户短语 -> 指标族 -> 直接指标/公式候选”的匹配结果是否合理。
+## 6. `queryIndicatorDimensionData` 的 Swagger 契约
 
-## 6. 以“最近一个月广告成功率是多少？”为例
-
-用户问题：
-
-```text
-最近一个月广告成功率是多少？
-```
-
-### 6.1 Layer 1 已完成的部分
-
-Layer 1 负责定位业务节点：
-
-```text
-广告 -> aliases -> business_and_platform.ADV / 广告相关节点
-```
-
-然后通过既有链路拿到某个广告逻辑实体下的候选指标列表。现阶段本地测试可以直接用 `advertising-metrics.yaml` 模拟。
-
-### 6.2 Layer 2 要完成的部分
-
-从用户问题抽取：
+不修改接口，只把三个必要参数及语义写清楚：
 
 ```yaml
-business_object: 广告
-metric_phrase: 广告成功率
-time_range: 最近一个月
+parameters:
+  - name: id
+    in: query
+    required: true
+    type: string
+    description: 从 getLogicEntityRealModel.metrics[*].id 原样取得的指标 ID，禁止传逻辑实体 ID。
+  - name: startTime
+    in: query
+    required: true
+    type: string
+    description: 查询开始时间；格式必须与现有接口要求一致。
+  - name: endTime
+    in: query
+    required: true
+    type: string
+    description: 查询结束时间；格式必须与现有接口要求一致，且不得早于 startTime。
 ```
 
-Metric Family 匹配：
+参数名、`in` 位置和时间格式必须以现有接口为准。若真实名字不是 `startTime/endTime`，
+只修改文档中的描述，不得把后端参数改成示例名称。
+
+## 7. 完整展示场景
+
+### 7.1 主场景：同时展示 Phase A、Phase B 和真实查数
+
+推荐演示问题：
 
 ```text
-metric_phrase=广告成功率
-  ↓
-包含“成功率”
-  ↓
-命中 metric family: success_rate
+最近一个月推广业务的成功占比是多少？
 ```
 
-在测试指标中匹配直接指标：
+展示价值：
+
+1. `推广业务` 不是节点标准名，通过 Phase A 的广告 aliases 命中。
+2. `成功占比` 不是指标标准名，通过 Phase B 的 `success_rate.aliases` 命中。
+3. RealModel 六个指标中，Phase B 选择直接指标“广告接口成功率”，而不是平均时延、内存使用率、
+   成功次数或请求次数。
+4. Agent 取该指标真实 `id`，调用 `queryIndicatorDimensionData` 返回最近一个月真实数据。
+
+执行轨迹：
 
 ```text
-广告接口成功率
+1. 解析：business_object=推广业务，metric_phrase=成功占比，time_range=最近一个月。
+2. locateNode("推广业务") -> 广告分类节点。
+3. getNextLevelNode(categoryId, "CATEGORY") -> 广告测试实体。
+4. getLogicEntityRealModel(广告测试实体真实 ID) -> 六个精简指标。
+5. success_rate family 命中“成功占比”。
+6. direct_metric 选中“广告接口成功率”，保存其真实 metric.id。
+7. 将“最近一个月”转换成明确的 [startTime, endTime]，并在结果中回显。
+8. queryIndicatorDimensionData(metric.id, startTime, endTime)。
+9. 按接口真实返回展示数值或时间序列，不编造聚合。
 ```
 
-同时也能识别公式候选：
+### 7.2 Phase B 变体验收
 
-```text
-广告接口成功次数 / 广告接口请求次数
-```
+使用同一真实实体追加三条查询，无需假数据：
 
-如果同时存在直接指标和公式候选，建议决策：
-
-```text
-优先使用直接指标“广告接口成功率”。
-同时在调试输出中说明：也找到了可解释公式候选“广告接口成功次数 / 广告接口请求次数”。
-```
-
-如果未来某个实体没有“广告接口成功率”，但有成功次数和请求次数，则按 `decision_policy.if_only_formula_exists`：
-
-```text
-使用公式候选，并说明成功率按 成功次数 / 请求次数 计算。
-```
-
-这里用户已经明确：成功率 = 成功次数 / 请求次数。因此测试期可以不强制追问，但输出必须说明口径。
-
-## 7. 弱 Agent 需要实现的本地 matcher
-
-建议新增一个本地服务/工具类，例如：
-
-```java
-class MetricFamilyMatcher {
-    MetricFamilyMatchResult match(String metricPhrase, List<MetricDefinition> metrics);
-}
-```
-
-输入：
-
-```java
-String metricPhrase = "广告成功率";
-List<MetricDefinition> metrics = loadTestMetrics();
-```
-
-输出建议：
-
-```json
-{
-  "matchedFamilyId": "success_rate",
-  "matchedFamilyNameCn": "成功率",
-  "directMetrics": [
-    {
-      "id": "ad_interface_success_rate",
-      "nameCn": "广告接口成功率",
-      "nameEn": "ad_interface_success_rate",
-      "level": "GOLD",
-      "type": "DERIVED",
-      "dataSource": "SERVER"
-    }
-  ],
-  "formulaCandidates": [
-    {
-      "expression": "numerator / denominator",
-      "numerator": {
-        "id": "ad_interface_success_count",
-        "nameCn": "广告接口成功次数"
-      },
-      "denominator": {
-        "id": "ad_interface_request_count",
-        "nameCn": "广告接口请求次数"
-      }
-    }
-  ],
-  "decision": "USE_DIRECT_METRIC",
-  "explanation": "命中指标族 success_rate；找到直接指标“广告接口成功率”，同时找到公式候选“广告接口成功次数 / 广告接口请求次数”。"
-}
-```
-
-## 8. 匹配流程
-
-### 8.1 先匹配指标族
-
-用 `metric_phrase` 匹配 `metric-families.yaml`：
-
-1. `metric_phrase` 精确等于某个 family alias。
-2. `metric_phrase` 包含某个 family alias。
-3. 某个 family alias 包含 `metric_phrase`。
-4. 英文大小写不敏感。
-5. `_`、`-`、空格做弱分隔符归一化。
-
-例如：
-
-```text
-广告成功率 -> 命中 success_rate，因为包含“成功率”。
-接口平均时延 -> 命中 latency 的 avg_latency variant。
-最大内存 -> 命中 memory_usage 的 max_memory_usage variant。
-```
-
-### 8.2 再匹配直接指标
-
-在候选指标列表中，用 family 的 `direct_metric.name_contains` 或 variant 的 `name_contains` 查找直接指标。
-
-例如 success_rate：
-
-```text
-广告接口成功率 name_cn 包含 成功率 -> direct metric
-```
-
-### 8.3 再匹配公式候选
-
-如果 family 有 `formula`：
-
-1. 用 numerator aliases/name_contains 找分子指标。
-2. 用 denominator aliases/name_contains 找分母指标。
-3. 分子和分母都存在时，生成 formula candidate。
-4. 如果直接指标不存在，但公式候选完整，根据 policy 决定是否可用。
-
-### 8.4 最后给出决策
-
-建议第一版决策规则：
-
-1. 有且只有一个直接指标：`USE_DIRECT_METRIC`。
-2. 有多个直接指标：`ASK_USER_TO_DISAMBIGUATE`。
-3. 没有直接指标，但有完整公式候选：`USE_FORMULA_WITH_EXPLANATION`。
-4. 既没有直接指标，也没有完整公式候选：`NO_MATCH`。
-5. 直接指标和公式候选都存在：`USE_DIRECT_METRIC`，但解释中列出公式候选。
-
-## 9. 如何保证不是只能处理“广告”
-
-Layer 2 的关键是：**Metric Family 与业务节点解耦。**
-
-`success_rate` 不写成“广告成功率本体”，而写成“成功率指标族”。这样它可以处理：
-
-```text
-广告成功率
-小艺接口成功率
-搜索成功率
-支付成功率
-翻译成功率
-```
-
-处理方式相同：
-
-```text
-<业务对象> + <指标族词>
-  ↓
-Layer 1 定位业务对象节点
-Layer 2 识别指标族
-在该业务对象对应的候选指标列表中找直接指标或公式候选
-```
-
-也就是说，广告只是测试样例，不是规则边界。
-
-后续扩展其他本体/节点时，通常只需要：
-
-1. 在对应节点 `base.yaml` 里补业务对象 aliases。
-2. 复用已有 `metric-families.yaml` 中的成功率、时延、内存等指标族。
-3. 如果出现全新的指标族，再往 `metric-families.yaml` 增加一个 family。
-4. 如果某个业务节点有特殊口径，再单独加 exception，不要污染通用 family。
-
-## 10. 弱 Agent 实施步骤
-
-1. 新增 `resources/ontology/metric-shelf/metric-families.yaml`。
-2. 先写入 `success_rate`、`latency`、`memory_usage` 三个指标族。
-3. 新增本地测试数据 `resources/ontology/metric-shelf/test-data/advertising-metrics.yaml`。
-4. 实现 `MetricFamilyLoader`，读取 `metric-families.yaml`。
-5. 实现 `MetricFamilyMatcher`，输入 `metric_phrase + metrics`，输出匹配结果。
-6. 写单测：`广告成功率` 应命中 `success_rate`。
-7. 单测断言直接指标为 `广告接口成功率`。
-8. 单测断言公式候选为 `广告接口成功次数 / 广告接口请求次数`。
-9. 单测断言 `广告接口平均时延` 能命中 `latency`。
-10. 单测断言 `广告接口最大内存使用率` 和 `广告接口最小内存使用率` 能命中 `memory_usage` 的不同 variant。
-11. 暂不接真实 SQL，暂不返回真实数值。
-
-## 11. 本地测试 checklist
-
-| 测试输入 | 期望 |
+| 用户说法 | 期望选择 |
 |---|---|
-| `广告成功率` | 命中 `success_rate` |
-| `广告接口成功率` | 直接指标候选为 `广告接口成功率` |
-| `广告成功率` + 测试指标列表 | 同时识别公式候选：成功次数 / 请求次数 |
-| `广告接口平均时延` | 命中 `latency`，variant 可识别为 avg latency |
-| `广告接口最小内存使用率` | 命中 `memory_usage`，variant 可识别为 min memory usage |
-| `广告接口最大内存使用率` | 命中 `memory_usage`，variant 可识别为 max memory usage |
-| `广告曝光率` | 如果未配置 exposure_rate，返回 `NO_MATCH` 或提示未配置，不要误判成成功率 |
-| `success rate` | 英文 alias 命中 `success_rate` |
+| `最近一个月广告平均延迟怎么样？` | 广告接口平均时延 |
+| `最近一个月广告最低内存占用率是多少？` | 广告接口最小内存使用率 |
+| `最近一个月广告最高内存使用率是多少？` | 广告接口最大内存使用率 |
 
-## 12. 常见错误
+这三条用于证明 family/variant 可以处理近义表达，同时保留平均、最小、最大约束。
 
-1. 把 `metric-families.yaml` 写进每个节点 `base.yaml`，导致规则复制和概念混淆。
-2. 把“广告成功率”写死成唯一规则，导致不能复用到小艺、搜索、支付等其他节点。
-3. 看到“rate”就把曝光率、点击率、成功率互相替代。
-4. 只有成功次数没有请求次数时仍然生成完整成功率公式。
-5. 为了本地测试去伪造真实 SQL 或真实数值。
-6. 把 Metric Family 当成真实指标清单，逐条维护所有指标。
-7. 忽略直接指标优先级，在已有“广告接口成功率”时仍强行用公式计算。
+### 7.3 负向验收
 
-## 13. 后续扩展方向
+1. 问“广告成功次数”时选择广告接口成功次数，不能选择成功率。
+2. 问“广告请求次数”时选择广告接口请求次数，不能选择成功次数。
+3. 问“广告 P95 时延”时，现有六个指标没有 P95，必须报告未找到，不能用平均时延代替。
+4. RealModel 出现多个高置信成功率时必须让用户消歧，不能静默选一个。
 
-Layer 2 跑通后，再考虑：
+## 8. 弱 Agent 实施步骤
 
-1. 增加 `filter-concepts.yaml`：黄金、健康、普通、端侧、基础、衍生、复合等。
-2. 增加 `metric-exceptions/`：只放高频、高风险、强歧义业务特例。
-3. 接真实 RealModel：把本地测试 metrics 替换成 `getLogicEntityRealModel` 返回的已部署指标。
-4. 接真实查数：等 SQL 执行链路明确后，再处理时间范围和结果计算。
+1. 保留并验证广告节点 `base.yaml` 的 `aliases`，至少覆盖 `推广`、`推广业务`、`ads`。
+2. 确认 locateNode 实际读取的是本体 DataModel 副本，并保留旧树搜索兜底。
+3. 新增或更新 `metric-families.yaml`，按第 4 节配置三个通用 family；不要写真实指标 ID。
+4. 删除此前计划的 `test-data/advertising-metrics.yaml` 及其 loader/fixture；不要再用假指标验收。
+5. 在 Java 工程中使用 `getLogicEntityRealModel` 的真实响应做 matcher 测试输入，至少验证六个指标均可见。
+6. 调整 Swagger 2.0 YAML 中 `getLogicEntityRealModel` 的响应 schema，只暴露第 5.2 节字段。
+7. 补充 `queryIndicatorDimensionData` 三个参数的来源、时间格式和禁止事项说明。
+8. 重新安装/刷新基于 Swagger 生成的工具。
+9. 先在 Swagger/MCP 工具层调用 RealModel，确认返回已被裁剪且指标 `id/nameCn` 没有丢失。
+10. 按第 7 节执行主场景、变体场景和负向场景。
+
+## 9. 必须写的测试
+
+### 9.1 代码侧测试
+
+1. `locateNode("推广业务")` 命中广告节点，并能追溯到 alias。
+2. `成功占比` 命中 `success_rate`。
+3. 六个真实指标同时作为候选时，只产生一个直接成功率候选。
+4. 成功次数和请求次数能组成公式候选，但直接成功率存在时决策仍为 `USE_DIRECT_METRIC`。
+5. `平均延迟`、`最低内存占用率`、`最高内存使用率` 分别命中正确变体。
+6. `P95 时延` 返回 `NO_MATCH`。
+7. 空 RealModel、缺少指标 ID、多个直接候选都有明确失败或消歧结果，不抛出无法理解的空指针异常。
+
+### 9.2 接口联调验收
+
+1. RealModel 工具输出只含允许字段，没有大块无关对象。
+2. “广告测试实体”的六个指标均有真实 `id` 和 `nameCn`。
+3. 选中的指标 ID 可原样调用 `queryIndicatorDimensionData`。
+4. 起止时间在请求和最终回答中一致。
+5. 返回结果来自接口；若为空，应展示空结果和实际查询范围，不能伪造数值。
+
+## 10. 跨业务扩展原则
+
+本方案不是“广告专用逻辑”：
+
+1. 新业务对象只需在其节点 `base.yaml` 增加 aliases，Phase A 主流程不变。
+2. 支付成功率、搜索成功率、小艺接口成功率继续复用 `success_rate`，无需复制 family。
+3. 新增 P95 时延等已知变体时扩展 `latency.variants`；不要硬编码到广告分支。
+4. 只有出现新的稳定指标口径时才新增 family。
+5. 实际指标 ID 永远从对应逻辑实体的 RealModel 动态获取，不能写入本体配置。
+6. 所有业务最终都复用同一条查询链：节点定位、实体获取、指标匹配、按 ID 和时间查数。
+
+## 11. 完成定义
+
+只有同时满足以下条件，才能宣布展示流程完成：
+
+1. Phase A 能用 `推广业务` 定位广告，不依赖 Agent 自己改写关键词。
+2. Phase B 能用 `成功占比` 选中“广告接口成功率”的真实 ID。
+3. RealModel 的 Agent 可见输出已显著裁剪，但没有丢失匹配和查数所需字段。
+4. `queryIndicatorDimensionData` 使用真实指标 ID 和明确起止时间返回真实结果或真实空结果。
+5. 云端 Agent 的最终回答包含命中对象、指标口径、查询时间范围和接口返回值。
+6. 主场景、变体场景、负向场景均通过。
