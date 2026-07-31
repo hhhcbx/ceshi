@@ -1,131 +1,164 @@
 ---
 name: metric-query
-description: 智能问数——在货架数据模型中按用户描述定位分类节点、获取逻辑实体并查询指标定义，支持按级别/类型等条件筛选指标，并以表格/图表形式呈现。当用户想查询某个业务/分类/对象相关的指标、字段或逻辑实体时使用，例如"帮我找小艺的指标"、"给我所有小艺的黄金指标"、"小艺_翻译有哪些指标"。
+description: 本体增强的真实指标问数。用于查询某个业务节点下的指标数值、趋势、比较或指标目录，例如“最近一个月的推广成功概率是啥”“广告平均时延趋势”“小艺有哪些指标”。先用 locateNode 的节点 aliases 锁定 Phase A 节点，再对该节点返回的全部逻辑实体逐一调用 Java Phase B 的 resolveMetric，最后按真实指标 ID 和时间范围查询数据。也用于结构浏览和字段查询。
 ---
 
-# 智能问数：货架数据模型指标查询
+# 本体增强的真实指标问数
 
-## 何时触发
+## 核心边界
 
-当用户想「查某个业务/分类相关的指标、字段、逻辑实体」，例如：
+- Java 是本体知识的唯一来源：节点 aliases 和 Metric Family 均由 Java YAML 维护。
+- 本 Skill 只负责编排、状态处理、时间解析和展示；不要在 Skill 中重建 aliases 或 Metric Family。
+- Phase A 一旦确定节点，本轮指标搜索范围即被锁定。只有用户明确更换业务对象或确认 Phase A 选错时，才可再次调用 `locateNode`。
+- 逻辑实体名称不能反映其指标内容。不得按实体名称猜测或只抽查一两个实体。
+- 工具契约见 [references/tools.md](references/tools.md)，输出规范见 [references/output-format.md](references/output-format.md)。
 
-- 「帮我找小艺的指标」
-- 「给我所有小艺的黄金指标」
-- 「小艺_翻译有哪些指标」
-- 「数据库相关的实体和指标有哪些」
+## 1. 抽取槽位
 
-## 数据模型心智模型（必须先理解）
+从用户问题抽取：
 
-- 树分两类节点：
-  - **分类节点（骨架，导航用）**：ID 是**点分字符串**，如 `business_and_platform.CEL`（小艺）、`business_and_platform.CEL.AIVision`（AI Vision）。
-  - **逻辑实体/运维对象（数据，目标）**：ID 是 **UUID**，如 `0b6b22bf-...`。
-- **点分 ID 天然编码了层级**：`A` 是 `B` 的祖先 ⟺ `B` 以 `A + "."` 开头。
-  例：`business_and_platform.CEL` 是 `business_and_platform.CEL.AIVision` 的祖先。这是**去重和选节点的核心依据**。
-- 指标（metrics）挂在**逻辑实体**上，要经「分类 → 逻辑实体 → 指标定义」三跳拿到。
-- **已确认**：`getNextLevelNode(分类)` 返回该分类**及其全部后代分类**下的所有逻辑实体（递归）。因此对祖先节点调用一次即可覆盖所有后代，绝不能对祖先与后代重复调用。
+```yaml
+business_object: 用于 Phase A 的业务对象原话
+metric_phrase: 用于 Phase B 的指标原话
+time_range: 用户原始时间表达
+query_mode: value | trend | comparison | definition | structure | fields
+filters: 可选筛选条件
+```
 
-工具入参、出参细节见 [references/tools.md](references/tools.md)。
-输出格式与图表规范见 [references/output-format.md](references/output-format.md)。
+不要擅自改写 `business_object` 或 `metric_phrase`。例如：
 
-## 核心工作流
+```text
+最近一个月的推广成功概率是啥？
+```
 
-### Stage 0 · 意图分类
+抽取为：
 
-先判断用户问题属于哪类，再路由：
+```yaml
+business_object: 推广
+metric_phrase: 成功概率
+time_range: 最近一个月
+query_mode: value
+```
 
-| 意图 | 特征 | 路由 |
-|---|---|---|
-| A. 指标定义查询 | 「找 X 的指标」「X 有哪些指标」 | Stage 1 → 6 完整流程 |
-| B. 指标筛选查询 | 「X 的黄金指标」「X 的复合指标」——带级别/类型等限定词 | 同 A，但 Stage 5.5 必须执行筛选 |
-| C. 指标数值/趋势查询 | 「近一个月 X 的日活趋势」——要**数值**或**图** | 当前工具只有指标**定义**，无时序数值。执行 A 流程找到对应指标定义并返回，同时**明确告知**：数值查询能力尚未接入，先给出该指标的定义信息；呈现规范见 output-format.md 的图表章节（数值源接入后启用） |
-| D. 结构浏览 | 「有哪些分类」「模型树长什么样」 | 用 `getModelTree` / `locateNode` 返回结构，不下钻实体 |
-| E. 字段查询 | 「X 有哪些字段」 | 同 A 流程，但 Stage 5 提取 `fields` 而非 `metrics` |
-| F. 与数据模型无关 | 闲聊、其他任务 | 不使用本 skill |
+## 2. Phase A：锁定节点
 
-多意图组合（如「黄金指标的趋势」）按 B + C 叠加处理。
+1. 调用 `locateNode(business_object)`，例如 `locateNode("推广")`。
+2. 只保留点分 ID 的分类节点。
+3. 广义查询做最小覆盖根剪枝：若一个候选是另一个候选的后代，只保留能够覆盖目标范围的祖先。
+4. 具体查询选择最贴合的具体节点，不扩大到父级。
+5. 多个节点无法可靠区分时先向用户确认。
+6. 保存确定的 `categoryId` 和路径，标记 `phase_a_locked=true`。
+7. `locateNode` 未命中或用户确认节点错误时可以追问；禁止自行造同义词循环调用 `locateNode`。
 
-### Stage 1 · 概念抽取 + 语义增强
+## 3. 获取节点下全部逻辑实体
 
-1. 从用户问题中抽取**目标概念**和**粒度**：
-   - 广义概念（如「小艺」）→ 后面要覆盖它名下所有内容。
-   - 具体对象（如「小艺_翻译」）→ 只锁定该节点，别扩到父级。
-2. 同时抽取**筛选条件**（级别、类型等限定词，如「黄金」「复合」），留给 Stage 5.5 使用；条件词→字段值的映射见 output-format.md。
-3. **语义增强**：为概念生成同义/近义候选词（如「小艺 / Celia」「存储 / 储存 / storage」）。中英都考虑。
-4. 得到一组关键词候选，进入定位。
+1. 对锁定节点只调用一次 `getNextLevelNode(categoryId, "CATEGORY")`。
+2. 使用 `publishedData`，按逻辑实体 `id` 去重。
+3. 保留每个实体的真实 `id` 和名称；不要按名称相关性过滤。
+4. 即使实体名称与指标完全无关，也必须进入 Phase B 扫描。
+5. 列表为空时报告该 Phase A 节点下没有逻辑实体，停止流程；不要重新定位其他节点。
 
-### Stage 2 · 定位候选节点
+## 4. Phase B：穷举当前节点内的全部实体
 
-- 对每个关键词调用 `locateNode(keyword)`，合并所有返回节点为候选集。
-- **只保留分类节点（点分 ID）** 用于后续导航；UUID 实体节点先忽略（它们会在 Stage 4 被自然覆盖到）。
-- 若用户没给明确概念、需要先了解有哪些顶层分类，才用 `getModelTree()` 兜底浏览。
+对去重后的**每一个逻辑实体**恰好调用一次：
 
-### Stage 3 · 节点筛选与去重（最关键，防重复/防爆量）
+```text
+resolveMetric(logicEntityId, metric_phrase)
+```
 
-先按**用户粒度**决定策略：
+执行要求：
 
-- **广义查询（要覆盖整个概念）**：做「**最小覆盖根**」剪枝——
-  - 在候选分类 ID 集合中，**若某节点的 ID 是另一节点 ID 的后代（前缀关系），删掉后代，只留祖先**。
-  - 依据：`getNextLevelNode` 是递归的，查祖先已完全覆盖后代，再查后代必然产生重复数据。
-  - 例：候选 `...CEL`、`...CEL.AIVision`、`...CEL.AIVision.celia_photo_editing` → 只保留 `...CEL`（小艺）。
+1. 可并行调用时并行；否则分批顺序调用，直至全部实体完成。
+2. 不因前几个实体返回 `NOT_FOUND` 而停止。
+3. 不因已经找到一个 `RESOLVED` 而停止，因为同一指标可能存在于多个逻辑实体。
+4. 不直接调用 `getLogicEntityRealModel` 自行匹配；Phase B 匹配由 Java `resolveMetric` 完成。
+5. 记录每个实体的 `RESOLVED`、`AMBIGUOUS`、`FORMULA_CANDIDATE`、`NOT_FOUND` 或错误状态。
+6. 单个实体调用失败时记录错误并继续其他实体；全部扫描后再汇总。
+7. 实体量较大时使用固定大小批次控制并发和上下文，但不得只扫描前 N 个实体。只保留匹配结果和失败摘要，不复述所有 `NOT_FOUND`。
 
-- **具体查询（只要某个具体对象）**：
-  - 选**名字与用户短语最贴合**的那个节点（优先精确/最长匹配），**只用它**，不要把它的父级祖先加进来（否则会把整个大类都拉出来）。
-  - 例：用户要「小艺_翻译」→ 选 `...CEL.AIVision.celia_translation` 这一个，忽略 `...CEL`。
+## 5. 汇总 Phase B 结果
 
-- **多关键词去重**：语义增强产生的多个关键词若命中重叠节点，先合并再按上面规则剪枝，确保**每个最终节点只查一次**。
+完成全部实体扫描后再决策。
 
-剪枝后得到一个**去重的目标分类节点列表**。
+### 没有任何候选
 
-### Stage 4 · 取逻辑实体
+若全部为 `NOT_FOUND`：
 
-- 对每个目标分类节点调 `getNextLevelNode(id, type="CATEGORY")`。
-- 汇总 `publishedData` 里的逻辑实体，保留每个实体的 `id` + `parentOperObjId` + 名称。
-- **按实体名与用户概念的相关性过滤**，去掉明显无关的（控制下一步调用量）。
-- **量控**：若实体数量很大（如 >20），先把实体清单（名称+ID）按相关性排序，优先处理最相关的若干个，避免一次性对全部实体取指标导致数据过载；必要时把清单先给用户确认。
+- 报告在已锁定节点及其全部逻辑实体中未找到该指标。
+- 给出已扫描实体数量和 Phase A 路径。
+- 停止，不得更换关键词再次调用 `locateNode`。
+- 只有用户明确更换业务对象或要求重新定位时，才开始新的 Phase A。
 
-### Stage 5 · 取指标定义
+### 一个直接指标
 
-- 对筛选后的每个逻辑实体调 `getLogicEntityDefineInfo(id, parentOperObjId)`。
-- 从 `publishedData.metrics` 提取指标；意图为字段查询（E）时提取 `publishedData.fields`。
+若全节点只有一个 `RESOLVED`：使用其 `selectedMetric.id` 查数。
 
-### Stage 5.5 · 条件筛选（意图 B 必须执行）
+### 多个直接指标
 
-- 若 Stage 1 抽取到了筛选条件（如「黄金指标」），在**汇总后的指标列表**上执行过滤，再进入呈现。
-- 条件词到字段值的映射（如 黄金→`level=GOLD`）见 output-format.md 的「筛选条件语义映射」。匹配时**大小写不敏感**。
-- 若筛选后结果为空：报告「找到 N 个指标，但没有满足 <条件> 的」，并列出实际存在的 level/type 取值分布，方便用户改口。
-- 遇到映射表未覆盖的新说法：先按最接近的规范值猜测并**在回答中说明按什么条件过滤的**，避免静默用错条件。
+若多个实体返回 `RESOLVED`：
 
-### Stage 6 · 汇总与呈现
+- 保留所有候选；同一指标可能分布在不同实体中。
+- 不根据实体名称或返回顺序静默选一个。
+- 若用户问题本身要求覆盖整个节点，则分别查询并按实体展示，禁止在没有聚合规则时合并数值。
+- 若用户只想要单一口径但候选意义不明，列出实体与指标名称并追问。
 
-**严格遵循 [references/output-format.md](references/output-format.md)。** 核心要求：
+### 歧义或公式候选
 
-- 指标默认返回字段：`measureType`、`nameCn`、`nameEn`、`description`、`type`、`level`、`tag`；某字段在**全部结果中都为空**则整列省略。用户明确指定要哪些字段时以用户为准。
-- 用 **Markdown 表格**呈现指标列表，按「分类路径 → 逻辑实体」分组，每个实体一张表。
-- 表格上方给出**关键信息头**：命中路径、实体名、指标总数、筛选条件（如有）。
-- 涉及趋势/数值的图表呈现（意图 C，数值源接入后启用）按 output-format.md 的图表章节执行。
-- 若结果为空，明确说明「未找到 X 相关节点/实体/指标」，并建议换个说法（触发语义增强重试）。
+- 任一 `AMBIGUOUS`：展示最少必要候选并追问。
+- 只有 `FORMULA_CANDIDATE`：说明公式和组成指标；未取得用户确认且接口未提供安全执行计划时不要自行计算。
+- 同时有直接指标和公式候选：优先直接指标；公式仅作为口径解释，不重复计算。
 
-### Stage 7 · 未来扩展(预留,现在不实现)
+## 6. 解析时间并查数
 
-- **取指标数值 / 时间筛选**（如「最近一个月的小艺指标」）：待指标数据源接入后，在 Stage 5.5 之后加「查数值」步骤；时间/条件筛选发生在查数值那一步。
-- **意图分类细化**：随接入能力增加，在 Stage 0 扩充意图类型和路由。
-- **接入其他数据库**：新数据源以新增 reference + Stage 0 路由分支的方式扩展，主流程不动。
+仅 `value/trend/comparison` 执行：
 
-## 通用规则
+1. 把时间原话转换成工具要求的明确 `startTime/endTime`。
+2. “最近一个月”表示截至当前时刻的滚动一个月；“上个月”表示上一个自然月。
+3. 使用已安装工具的实际格式和时区，并在最终回答中回显。
+4. 对每个最终选中的直接指标调用：
 
-- **层级判断只用点分 ID 前缀**，不用 `locateNode` 的 `depth`（该字段目前不可靠）。
-- **每个目标节点只调一次 `getNextLevelNode`**，靠 Stage 3 剪枝保证；严禁对祖先和后代节点都调用。
-- **`getLogicEntityDefineInfo` 的两个入参（`id`、`parentOperObjId`）都来自 `getNextLevelNode` 的返回**，不要自己拼。
-- **控量优先**：任何一步预感数据量大时，先收敛（过滤/排序/截断/向用户确认），再深入，避免上下文过载。
-- 找不到就如实说 + 建议换词，不要编造节点、ID 或指标。
+```text
+queryIndicatorDimensionData(selectedMetric.id, startTime, endTime)
+```
 
-## 完整示例（「给我所有小艺的黄金指标」）
+5. 传指标 ID，不传分类 ID 或逻辑实体 ID。
+6. 返回空就报告空，不补零、不换指标、不使用假数据。
+7. 多实体结果分别展示；没有明确聚合规则时不得求和、平均或计算总体成功率。
 
-1. **Stage 0**：意图 = B（指标筛选查询），筛选条件 =「黄金」。
-2. **Stage 1**：概念=「小艺」，粒度=广义；增强候选=[小艺, Celia]；条件映射：黄金 → `level=GOLD`。
-3. **Stage 2**：`locateNode("小艺")` → 得到 `...CEL`（小艺）、`...CEL.AIVision` 等。
-4. **Stage 3**：最小覆盖根剪枝 → 只留 `business_and_platform.CEL`。
-5. **Stage 4**：`getNextLevelNode("business_and_platform.CEL", "CATEGORY")` → 小艺及其所有子分类下的逻辑实体。
-6. **Stage 5**：对相关实体逐个 `getLogicEntityDefineInfo(id, parentOperObjId)` → 提取 `metrics`。
-7. **Stage 5.5**：过滤 `level == GOLD`（大小写不敏感）。
-8. **Stage 6**：按 output-format.md 分组出表：路径 + 实体信息头，指标表格含默认字段（全空列省略），并注明「筛选条件：level=GOLD（黄金指标）」。
+## 7. 完整示例
+
+用户：
+
+```text
+最近一个月的推广成功概率是啥？
+```
+
+执行：
+
+1. 抽取 `business_object=推广`、`metric_phrase=成功概率`、`time_range=最近一个月`、`query_mode=value`。
+2. 调 `locateNode("推广")`。Java Phase A 读取节点 `base.yaml` 的 aliases，将“推广”映射到广告分类。
+3. 锁定广告 `categoryId`；后续即使未命中指标，也不得自由改词重新定位节点。
+4. 调一次 `getNextLevelNode(categoryId, "CATEGORY")`，取得该节点及后代中的全部逻辑实体。
+5. 不看实体名称猜指标；对每个去重后的实体调用 `resolveMetric(entity.id, "成功概率")`。
+6. Java Phase B 读取 `metric-families.yaml`，把“成功概率”识别为 `success_rate`，并在各实体真实 RealModel 中匹配指标。
+7. 扫描全部实体后汇总。若“广告测试实体”返回“广告接口成功率”的真实 ID，且没有其他直接候选，选中该 ID。
+8. 将“最近一个月”转换为明确起止时间。
+9. 调 `queryIndicatorDimensionData(metricId, startTime, endTime)`。
+10. 展示命中节点、逻辑实体、指标名称、语义口径、实际时间范围和真实返回。
+
+## 8. 定义、结构和字段查询
+
+- 结构浏览：使用 `getModelTree` / `locateNode`，不执行实体穷举和查数。
+- 逻辑实体指标目录：用户明确要求目录时可调用 `getLogicEntityRealModel`；不要用它在 Skill 中重写 Phase B。
+- 字段查询：使用 `getLogicEntityDefineInfo` 的 `fields`；其未部署指标不能用于生产查数。
+
+## 9. 禁止事项
+
+1. Phase A 锁定后，不因 Phase B 未命中而自由造词再次调用 `locateNode`。
+2. 不按逻辑实体名称过滤 Phase B 扫描范围。
+3. 不只尝试一两个实体，也不找到第一个结果就提前结束。
+4. 不在 Skill 中硬编码节点 aliases、Metric Family 或真实 ID。
+5. 不自行扫描 RealModel、执行 SQL 或拼接 ID。
+6. 不把成功概率、成功次数、请求次数当成同一个指标。
+7. 不把平均、最小、最大、P95/P99 等口径互相替代。
+8. 不在多个候选间静默选择，不在没有聚合规则时合并跨实体数据。
