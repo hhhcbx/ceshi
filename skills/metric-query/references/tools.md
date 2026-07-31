@@ -79,18 +79,40 @@
 
 ## getLogicEntityRealModel
 
-**作用**：返回逻辑实体的已部署指标精简目录，供 Agent 选择真实指标 ID。
+**作用**：返回逻辑实体的已部署指标目录，用于用户明确要求浏览指标或排查。
 
 | 项 | 说明 |
 |---|---|
 | 入参 | `id`（string，必填）：逻辑实体 UUID |
-| 出参 | 逻辑实体基本标识和已部署指标数组；指标至少含 `id` / `nameCn`，并可含 `nameEn` / `description` / `unit` / `type` / `level` |
+| 出参 | 逻辑实体及其已部署指标；Agent 可见字段以 Swagger 投影为准 |
 
 要点：
 
-- 该接口已可访问数据库，但原始响应很大；安装工具使用的 Swagger 2.0 schema 应只投影上述必要字段。
-- 指标 `id` 是后续 `queryIndicatorDimensionData` 的入参，必须原样使用，禁止自行拼接。
-- 如果返回仍包含大量无关对象，说明 Swagger 投影可能未生效，应先停止批量调用并修复工具配置。
+- 标准数值问数使用 `resolveMetric`，不要由 Agent 拉取 RealModel 后自行实现 Phase B。
+- 原始响应很大；仅在指标目录浏览或排查时调用，并遵守 Swagger 控量。
+
+## resolveMetric
+
+**作用**：Java Phase B。对一个逻辑实体解析用户指标短语，并返回真实指标候选。
+
+| 项 | 说明 |
+|---|---|
+| 入参 | `logicEntityId`：来自 `getNextLevelNode` 的逻辑实体 ID；`metricPhrase`：用户指标原话 |
+| 出参 | `status`，以及按状态出现的 `selectedMetric` / `candidates` / `formula` / `message` |
+
+状态：
+
+- `RESOLVED`：唯一直接指标，使用 `selectedMetric.id`。
+- `AMBIGUOUS`：多个候选，必须追问。
+- `FORMULA_CANDIDATE`：只有公式候选，未经确认和安全执行计划不得自行计算。
+- `NOT_FOUND`：该实体没有目标指标。
+
+要点：
+
+- `resolveMetric` 内部读取 Java Metric Family 和真实 RealModel；Agent 不上传 RealModel。
+- `getNextLevelNode` 返回的实体名称不能用于判断指标内容。对锁定 Phase A 节点下的每个去重实体都调用一次。
+- 不因前几个 `NOT_FOUND` 或第一个 `RESOLVED` 提前结束；扫描全部实体后统一决策。
+- 单实体失败不阻塞其他实体；记录失败摘要后继续。
 
 ## queryIndicatorDimensionData
 
@@ -103,7 +125,7 @@
 
 要点：
 
-- `id` 必须来自本次 `getLogicEntityRealModel` 返回的指标项，不是分类 ID 或逻辑实体 ID。
+- `id` 必须来自 `resolveMetric.selectedMetric.id`，不是分类 ID 或逻辑实体 ID。
 - 开始和结束时间都必须明确，并在最终回答中回显实际范围和时区。
 - 不改变接口返回的聚合含义，不自行编造总值、平均值或趋势。
 - 返回为空时如实报告空结果，不使用本地假数据补齐。
@@ -111,10 +133,10 @@
 ## 典型调用链
 
 ```text
-locateNode(关键词)                    # 定位候选分类节点
-  └─> [Stage 3 剪枝：最小覆盖根 / 最贴合节点]
-        └─> getNextLevelNode(分类id, CATEGORY)          # 取逻辑实体（递归覆盖后代）
-              └─> getLogicEntityRealModel(实体id)       # 取已部署指标精简目录
-                    └─> [Metric Family 匹配真实指标id]
-                          └─> queryIndicatorDimensionData(指标id, 开始时间, 结束时间)
+locateNode(业务对象)                              # Phase A，只定位一次
+  └─> [锁定分类节点]
+        └─> getNextLevelNode(分类id, CATEGORY)            # 取全部逻辑实体并按id去重
+              └─> resolveMetric(每个实体id, 指标原话)     # Phase B，全部实体各调用一次
+                    └─> [扫描完成后汇总候选]
+                          └─> queryIndicatorDimensionData(选中指标id, 开始时间, 结束时间)
 ```

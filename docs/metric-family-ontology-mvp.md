@@ -71,6 +71,7 @@ metric_families:
     aliases:
       - 成功率
       - 成功占比
+      - 成功概率
       - 接口成功率
       - success rate
       - success_rate
@@ -419,7 +420,7 @@ RealModel service 使用 mock，返回与真实“广告测试实体”字段结
 
 | 输入 | 期望 |
 |---|---|
-| `成功占比` | `success_rate`，选择广告接口成功率 |
+| `成功占比` / `成功概率` | `success_rate`，选择广告接口成功率 |
 | `接口成功率` | `success_rate`，选择广告接口成功率 |
 | `平均延迟` | `latency.avg_latency`，选择广告接口平均时延 |
 | `最低内存占用率` | 选择广告接口最小内存使用率 |

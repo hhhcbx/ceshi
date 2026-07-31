@@ -1,184 +1,164 @@
 ---
 name: metric-query
-description: 智能问数——通过节点 aliases 定位货架分类，从 RealModel 精简指标目录中按 Metric Family 选择真实指标 ID，再按起止时间查询并展示真实指标数据。适用于“最近一个月推广业务的成功占比是多少”“广告平均时延趋势”等问题，也支持指标定义和结构浏览。
+description: 本体增强的真实指标问数。用于查询某个业务节点下的指标数值、趋势、比较或指标目录，例如“最近一个月的推广成功概率是啥”“广告平均时延趋势”“小艺有哪些指标”。先用 locateNode 的节点 aliases 锁定 Phase A 节点，再对该节点返回的全部逻辑实体逐一调用 Java Phase B 的 resolveMetric，最后按真实指标 ID 和时间范围查询数据。也用于结构浏览和字段查询。
 ---
 
-# 智能问数：本体增强的真实指标查询
+# 本体增强的真实指标问数
 
-## 何时触发
+## 核心边界
 
-用户要查询业务对象相关的指标定义、指标值、趋势、对比、字段或货架结构时使用。例如：
+- Java 是本体知识的唯一来源：节点 aliases 和 Metric Family 均由 Java YAML 维护。
+- 本 Skill 只负责编排、状态处理、时间解析和展示；不要在 Skill 中重建 aliases 或 Metric Family。
+- Phase A 一旦确定节点，本轮指标搜索范围即被锁定。只有用户明确更换业务对象或确认 Phase A 选错时，才可再次调用 `locateNode`。
+- 逻辑实体名称不能反映其指标内容。不得按实体名称猜测或只抽查一两个实体。
+- 工具契约见 [references/tools.md](references/tools.md)，输出规范见 [references/output-format.md](references/output-format.md)。
 
-- “最近一个月推广业务的成功占比是多少？”
-- “最近 7 天广告平均延迟趋势”
-- “广告有哪些指标？”
-- “有哪些业务分类？”
+## 1. 抽取槽位
 
-## 心智模型
-
-1. **分类节点**使用点分 ID，是导航骨架；点分前缀表示祖先关系。
-2. **逻辑实体**使用 UUID，指标挂在逻辑实体上。
-3. **Phase A 节点本体**：`locateNode` 用节点 `aliases` 把“推广业务”等用户说法映射到广告分类。
-4. **Phase B Metric Family**：把“成功占比”“平均延迟”等说法映射到 RealModel 的真实指标。
-5. **RealModel** 是已部署指标目录；指标 `id` 是真实查数入口。
-6. **queryIndicatorDimensionData** 按指标 ID、开始时间和结束时间返回真实数据。
-
-工具契约见 [references/tools.md](references/tools.md)，呈现规范见
-[references/output-format.md](references/output-format.md)。
-
-## Stage 0：意图与槽位
-
-抽取：
+从用户问题抽取：
 
 ```yaml
-business_object: 用于定位分类的短语
-metric_phrase: 指标短语
-time_range: 用户原话及明确起止时间
-query_mode: definition | value | trend | comparison | structure | fields
-filters: 可选的等级、类型或维度条件
+business_object: 用于 Phase A 的业务对象原话
+metric_phrase: 用于 Phase B 的指标原话
+time_range: 用户原始时间表达
+query_mode: value | trend | comparison | definition | structure | fields
+filters: 可选筛选条件
 ```
 
-路由：
+不要擅自改写 `business_object` 或 `metric_phrase`。例如：
 
-| 意图 | 后续流程 |
-|---|---|
-| 指标值/趋势/对比 | Stage 1 至 Stage 7 全流程 |
-| 指标目录/定义 | Stage 1 至 Stage 5，展示 RealModel 精简指标目录 |
-| 字段查询 | 使用 `getLogicEntityDefineInfo` 的 fields；不要把定义指标用于生产查数 |
-| 结构浏览 | `getModelTree` / `locateNode`，不下钻查数 |
+```text
+最近一个月的推广成功概率是啥？
+```
 
-## Stage 1：Phase A 节点定位
+抽取为：
 
-1. 将抽取出的 `business_object` **原样优先**传给 `locateNode`。例如“推广业务”直接调用
-   `locateNode("推广业务")`，用于验证服务端 alias，不要先由 Agent 改写成“广告”。
+```yaml
+business_object: 推广
+metric_phrase: 成功概率
+time_range: 最近一个月
+query_mode: value
+```
+
+## 2. Phase A：锁定节点
+
+1. 调用 `locateNode(business_object)`，例如 `locateNode("推广")`。
 2. 只保留点分 ID 的分类节点。
-3. 广义查询做最小覆盖根剪枝：若 B 以 `A + "."` 开头，保留 A、删除 B。
-4. 具体查询选名称/别名最贴合的节点，不额外加入祖先。
-5. 多个候选无法唯一确定时追问。
-6. 仅在 alias 未命中时，才使用 Agent 中英同义改写兜底，并明确说明发生了兜底。
+3. 广义查询做最小覆盖根剪枝：若一个候选是另一个候选的后代，只保留能够覆盖目标范围的祖先。
+4. 具体查询选择最贴合的具体节点，不扩大到父级。
+5. 多个节点无法可靠区分时先向用户确认。
+6. 保存确定的 `categoryId` 和路径，标记 `phase_a_locked=true`。
+7. `locateNode` 未命中或用户确认节点错误时可以追问；禁止自行造同义词循环调用 `locateNode`。
 
-`getNextLevelNode` 会递归覆盖后代，因此每个剪枝后的节点只调用一次。
+## 3. 获取节点下全部逻辑实体
 
-## Stage 2：获取逻辑实体
+1. 对锁定节点只调用一次 `getNextLevelNode(categoryId, "CATEGORY")`。
+2. 使用 `publishedData`，按逻辑实体 `id` 去重。
+3. 保留每个实体的真实 `id` 和名称；不要按名称相关性过滤。
+4. 即使实体名称与指标完全无关，也必须进入 Phase B 扫描。
+5. 列表为空时报告该 Phase A 节点下没有逻辑实体，停止流程；不要重新定位其他节点。
 
-1. 调 `getNextLevelNode(categoryId, "CATEGORY")`。
-2. 使用 `publishedData` 中的真实实体 `id`、`nameCn/nameEn`、`parentOperObjId`。
-3. 按用户对象与实体名称相关性收敛。广告演示应找到“广告测试实体”。
-4. 多个实体都可能包含目标指标时，逐个获取精简 RealModel；多个高置信结果必须追问。
-5. 实体过多时先排序/截断或请用户确认，禁止不加控制地批量调用。
+## 4. Phase B：穷举当前节点内的全部实体
 
-## Stage 3：获取已部署指标
-
-对候选实体调用：
-
-```text
-getLogicEntityRealModel(logicEntityId)
-```
-
-只读取 Agent 可见的精简字段：指标 `id`、`nameCn`、`nameEn`、`description`、`unit`、
-`type`、`level`（后五项按实际存在使用）。
-
-规则：
-
-1. 生产查数只使用 RealModel 指标。
-2. `getLogicEntityDefineInfo` 仅用于字段查询、测试或排查，不作为生产指标来源。
-3. RealModel 指标 ID 必须原样保存，禁止拼接。
-4. 若工具仍返回巨型对象，停止继续批量调用并报告 Swagger 投影未生效。
-
-## Stage 4：Phase B Metric Family 匹配
-
-### 通用规则
-
-1. 先用 family aliases 识别指标族，再在本实体指标中找直接指标。
-2. `nameCn` 优先，`nameEn` 次之，`description` 只用于消歧。
-3. 保留平均/最小/最大、P95/P99、次数/比率等限定词。
-4. 唯一高置信候选可选用；多个候选必须追问；没有对应变体则报告未找到。
-
-### MVP families
-
-| 用户说法 | family/variant | RealModel 匹配 |
-|---|---|---|
-| 成功率、成功占比、接口成功率 | `success_rate` | 名称含成功率 / `success_rate` |
-| 平均时延、平均延迟 | `latency.avg_latency` | 名称含平均时延/平均延迟 |
-| 最小内存使用率、最低内存占用率 | `memory_usage_rate.min` | 名称含最小/最低 + 内存 + 使用率 |
-| 最大内存使用率、最高内存占用率 | `memory_usage_rate.max` | 名称含最大/最高 + 内存 + 使用率 |
-
-成功率特别规则：
-
-1. 直接“成功率”存在时，使用其 ID。
-2. “成功次数 / 请求次数”只是公式候选；直接指标存在时不要重算。
-3. 只有公式候选时先确认口径，还要确认两次查询结果的时间粒度可以对齐。
-4. 成功次数、请求次数、成功率不是同一个指标。
-
-负向规则：
-
-- P95/P99 不能用平均时延代替。
-- 最小值不能用最大值代替。
-- 使用率不能用使用量代替。
-- 点击率、曝光率不能用成功率代替。
-
-## Stage 5：指标元数据筛选
-
-用户明确要求等级或类型时，才应用 `level/type` 过滤；语义映射见
-[references/output-format.md](references/output-format.md)。字段不存在时说明无法可靠过滤，不要猜。
-
-过滤必须发生在候选指标匹配期间，不能先选一个指标再假装它符合条件。
-
-## Stage 6：时间解析与真实查数
-
-仅 `value/trend/comparison` 意图执行：
-
-1. 把用户时间表达转换成明确起止时间。
-2. “最近一个月”是截止当前时刻的滚动一个月；“上个月”是上一个自然月。
-3. 按工具实际格式和时区构造参数，并保存用于最终回显。
-4. 调用：
+对去重后的**每一个逻辑实体**恰好调用一次：
 
 ```text
-queryIndicatorDimensionData(metric.id, startTime, endTime)
+resolveMetric(logicEntityId, metric_phrase)
 ```
 
-5. 这里的 `id` 是 RealModel 的指标 ID，不是分类 ID 或逻辑实体 ID。
-6. 用户没给时间而接口要求必填时先追问。
-7. 工具返回空就报告空，不补零、不换近似指标、不使用假数据。
+执行要求：
 
-## Stage 7：呈现
+1. 可并行调用时并行；否则分批顺序调用，直至全部实体完成。
+2. 不因前几个实体返回 `NOT_FOUND` 而停止。
+3. 不因已经找到一个 `RESOLVED` 而停止，因为同一指标可能存在于多个逻辑实体。
+4. 不直接调用 `getLogicEntityRealModel` 自行匹配；Phase B 匹配由 Java `resolveMetric` 完成。
+5. 记录每个实体的 `RESOLVED`、`AMBIGUOUS`、`FORMULA_CANDIDATE`、`NOT_FOUND` 或错误状态。
+6. 单个实体调用失败时记录错误并继续其他实体；全部扫描后再汇总。
+7. 实体量较大时使用固定大小批次控制并发和上下文，但不得只扫描前 N 个实体。只保留匹配结果和失败摘要，不复述所有 `NOT_FOUND`。
 
-严格遵循 [references/output-format.md](references/output-format.md)。至少包含：
+## 5. 汇总 Phase B 结果
 
-- 命中分类路径和逻辑实体。
-- 用户说法命中的 Metric Family 及真实指标名称。
-- 实际查询起止时间和时区。
-- `queryIndicatorDimensionData` 的真实返回摘要。
-- 必要口径说明；例如直接成功率存在，因此未用成功次数/请求次数重算。
+完成全部实体扫描后再决策。
 
-单值直接展示；时间序列优先折线图；接口返回的聚合语义不得擅自改变。
+### 没有任何候选
 
-## 完整演示：Phase A + Phase B + 真实数据
+若全部为 `NOT_FOUND`：
+
+- 报告在已锁定节点及其全部逻辑实体中未找到该指标。
+- 给出已扫描实体数量和 Phase A 路径。
+- 停止，不得更换关键词再次调用 `locateNode`。
+- 只有用户明确更换业务对象或要求重新定位时，才开始新的 Phase A。
+
+### 一个直接指标
+
+若全节点只有一个 `RESOLVED`：使用其 `selectedMetric.id` 查数。
+
+### 多个直接指标
+
+若多个实体返回 `RESOLVED`：
+
+- 保留所有候选；同一指标可能分布在不同实体中。
+- 不根据实体名称或返回顺序静默选一个。
+- 若用户问题本身要求覆盖整个节点，则分别查询并按实体展示，禁止在没有聚合规则时合并数值。
+- 若用户只想要单一口径但候选意义不明，列出实体与指标名称并追问。
+
+### 歧义或公式候选
+
+- 任一 `AMBIGUOUS`：展示最少必要候选并追问。
+- 只有 `FORMULA_CANDIDATE`：说明公式和组成指标；未取得用户确认且接口未提供安全执行计划时不要自行计算。
+- 同时有直接指标和公式候选：优先直接指标；公式仅作为口径解释，不重复计算。
+
+## 6. 解析时间并查数
+
+仅 `value/trend/comparison` 执行：
+
+1. 把时间原话转换成工具要求的明确 `startTime/endTime`。
+2. “最近一个月”表示截至当前时刻的滚动一个月；“上个月”表示上一个自然月。
+3. 使用已安装工具的实际格式和时区，并在最终回答中回显。
+4. 对每个最终选中的直接指标调用：
+
+```text
+queryIndicatorDimensionData(selectedMetric.id, startTime, endTime)
+```
+
+5. 传指标 ID，不传分类 ID 或逻辑实体 ID。
+6. 返回空就报告空，不补零、不换指标、不使用假数据。
+7. 多实体结果分别展示；没有明确聚合规则时不得求和、平均或计算总体成功率。
+
+## 7. 完整示例
 
 用户：
 
 ```text
-最近一个月推广业务的成功占比是多少？
+最近一个月的推广成功概率是啥？
 ```
 
 执行：
 
-1. 抽取 `business_object=推广业务`、`metric_phrase=成功占比`、`time=最近一个月`。
-2. `locateNode("推广业务")`，由 Phase A alias 命中广告节点。
-3. `getNextLevelNode`，找到“广告测试实体”。
-4. `getLogicEntityRealModel`，获得六个真实指标的精简目录。
-5. Phase B 把“成功占比”识别为 `success_rate`。
-6. 唯一选中“广告接口成功率”，使用其真实 `id`；不选成功次数或请求次数。
-7. 转换最近一个月为明确起止时间。
-8. `queryIndicatorDimensionData(id, startTime, endTime)`。
-9. 展示真实结果、实际时间和口径说明。
+1. 抽取 `business_object=推广`、`metric_phrase=成功概率`、`time_range=最近一个月`、`query_mode=value`。
+2. 调 `locateNode("推广")`。Java Phase A 读取节点 `base.yaml` 的 aliases，将“推广”映射到广告分类。
+3. 锁定广告 `categoryId`；后续即使未命中指标，也不得自由改词重新定位节点。
+4. 调一次 `getNextLevelNode(categoryId, "CATEGORY")`，取得该节点及后代中的全部逻辑实体。
+5. 不看实体名称猜指标；对每个去重后的实体调用 `resolveMetric(entity.id, "成功概率")`。
+6. Java Phase B 读取 `metric-families.yaml`，把“成功概率”识别为 `success_rate`，并在各实体真实 RealModel 中匹配指标。
+7. 扫描全部实体后汇总。若“广告测试实体”返回“广告接口成功率”的真实 ID，且没有其他直接候选，选中该 ID。
+8. 将“最近一个月”转换为明确起止时间。
+9. 调 `queryIndicatorDimensionData(metricId, startTime, endTime)`。
+10. 展示命中节点、逻辑实体、指标名称、语义口径、实际时间范围和真实返回。
 
-## 禁止事项
+## 8. 定义、结构和字段查询
 
-1. 不让 Agent 自由联想替代 Phase A 或 Phase B；自由语义增强仅作显式兜底。
-2. 不执行 SQL，不从 RealModel 猜 SQL。
-3. 不自行构造节点、实体或指标 ID。
-4. 不用本地假数据补充真实数据库。
-5. 不在多个高置信候选中静默选择。
-6. 不对祖先和后代分类重复调用 `getNextLevelNode`。
-7. 不把相似但不同的指标口径互相替代。
+- 结构浏览：使用 `getModelTree` / `locateNode`，不执行实体穷举和查数。
+- 逻辑实体指标目录：用户明确要求目录时可调用 `getLogicEntityRealModel`；不要用它在 Skill 中重写 Phase B。
+- 字段查询：使用 `getLogicEntityDefineInfo` 的 `fields`；其未部署指标不能用于生产查数。
+
+## 9. 禁止事项
+
+1. Phase A 锁定后，不因 Phase B 未命中而自由造词再次调用 `locateNode`。
+2. 不按逻辑实体名称过滤 Phase B 扫描范围。
+3. 不只尝试一两个实体，也不找到第一个结果就提前结束。
+4. 不在 Skill 中硬编码节点 aliases、Metric Family 或真实 ID。
+5. 不自行扫描 RealModel、执行 SQL 或拼接 ID。
+6. 不把成功概率、成功次数、请求次数当成同一个指标。
+7. 不把平均、最小、最大、P95/P99 等口径互相替代。
+8. 不在多个候选间静默选择，不在没有聚合规则时合并跨实体数据。
