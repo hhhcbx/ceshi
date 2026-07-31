@@ -79,28 +79,64 @@
 
 ## getLogicEntityRealModel
 
-**作用**：返回逻辑实体上**已部署指标**的实时/落地模型，核心是各指标对应的 **SQL 语句**（用于后续实际查数与画图）。
+**作用**：返回逻辑实体的已部署指标目录，用于用户明确要求浏览指标或排查。
 
 | 项 | 说明 |
 |---|---|
 | 入参 | `id`（string，必填）：逻辑实体 UUID |
-| 出参 | 已部署指标及相关 SQL / 模型信息（非空；以云上实际返回结构为准） |
+| 出参 | 逻辑实体及其已部署指标；Agent 可见字段以 Swagger 投影为准 |
 
 要点：
 
-- **已可用**：不要再当作空接口跳过。意图需要数值/趋势时，在选定逻辑实体（及目标指标）后调用。
-- 返回的 SQL 是取数依据；**执行 SQL 的数据库通道、权限与限流**由运行环境提供，本 Skill 不内嵌连接串。
-- 先完成定义侧对齐（Stage 5 / 5.7）再取 RealModel，避免对大量无关实体拉 SQL。
-- 解析时按目标指标的中英名/标识与返回项对齐；对不上则说明「定义在、部署 SQL 未找到」，不要编造数值。
+- 标准数值问数使用 `resolveMetric`，不要由 Agent 拉取 RealModel 后自行实现 Phase B。
+- 原始响应很大；仅在指标目录浏览或排查时调用，并遵守 Swagger 控量。
+
+## resolveMetric
+
+**作用**：Java Phase B。对一个逻辑实体解析用户指标短语，并返回真实指标候选。
+
+| 项 | 说明 |
+|---|---|
+| 入参 | `logicEntityId`：来自 `getNextLevelNode` 的逻辑实体 ID；`metricPhrase`：用户指标原话 |
+| 出参 | `status`，以及按状态出现的 `selectedMetric` / `candidates` / `formula` / `message` |
+
+状态：
+
+- `RESOLVED`：唯一直接指标，使用 `selectedMetric.id`。
+- `AMBIGUOUS`：多个候选，必须追问。
+- `FORMULA_CANDIDATE`：只有公式候选，未经确认和安全执行计划不得自行计算。
+- `NOT_FOUND`：该实体没有目标指标。
+
+要点：
+
+- `resolveMetric` 内部读取 Java Metric Family 和真实 RealModel；Agent 不上传 RealModel。
+- `getNextLevelNode` 返回的实体名称不能用于判断指标内容。对锁定 Phase A 节点下的每个去重实体都调用一次。
+- 不因前几个 `NOT_FOUND` 或第一个 `RESOLVED` 提前结束；扫描全部实体后统一决策。
+- 单实体失败不阻塞其他实体；记录失败摘要后继续。
+
+## queryIndicatorDimensionData
+
+**作用**：按真实指标 ID 和起止时间查询指标数据。
+
+| 项 | 说明 |
+|---|---|
+| 入参 | 指标 `id`、查询开始时间、查询结束时间；参数名称和时间格式以已安装工具为准 |
+| 出参 | 该指标在时间范围内的真实数据，可能是单值、时间序列或空结果 |
+
+要点：
+
+- `id` 必须来自 `resolveMetric.selectedMetric.id`，不是分类 ID 或逻辑实体 ID。
+- 开始和结束时间都必须明确，并在最终回答中回显实际范围和时区。
+- 不改变接口返回的聚合含义，不自行编造总值、平均值或趋势。
+- 返回为空时如实报告空结果，不使用本地假数据补齐。
 
 ## 典型调用链
 
 ```text
-[可选] 本体锚定 → category_ids / locate_keywords / entity&metric 候选
-locateNode(关键词) 或 直接使用本体 category_id
-  └─> [Stage 3 剪枝：最小覆盖根 / 最贴合节点]
-        └─> getNextLevelNode(分类id, CATEGORY)          # 取逻辑实体（递归覆盖后代）
-              └─> getLogicEntityDefineInfo(实体id, parentOperObjId)   # 取指标定义
-                    └─> [Stage 5.7 语义消歧]
-                          └─> (意图 C) getLogicEntityRealModel(实体id) → 执行 SQL → 绘图
+locateNode(业务对象)                              # Phase A，只定位一次
+  └─> [锁定分类节点]
+        └─> getNextLevelNode(分类id, CATEGORY)            # 取全部逻辑实体并按id去重
+              └─> resolveMetric(每个实体id, 指标原话)     # Phase B，全部实体各调用一次
+                    └─> [扫描完成后汇总候选]
+                          └─> queryIndicatorDimensionData(选中指标id, 开始时间, 结束时间)
 ```
