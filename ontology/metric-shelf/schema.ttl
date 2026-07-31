@@ -1,0 +1,142 @@
+# metric-shelf ontology — TBox
+# 货架智能问数语义层：概念 / 意图 / 到货架契约的映射
+# 实例数据（ABox）以 concepts.yaml 维护；本文件定义可复用结构。
+
+@prefix :     <urn:aiops:metric-shelf#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:aiops:metric-shelf> a owl:Ontology ;
+    rdfs:label "Metric Shelf Semantic Layer" ;
+    rdfs:comment "Business semantic map between colloquial concepts and shelf (databp) API bindings. Not a data warehouse." .
+
+##############################################################################
+# Classes
+##############################################################################
+
+:BusinessConcept a owl:Class ;
+    rdfs:label "BusinessConcept" ;
+    rdfs:comment "A business-facing concept that users may refer to in natural language." .
+
+:Utterance a owl:Class ;
+    rdfs:label "Utterance" ;
+    rdfs:comment "A literal user phrasing attached to a concept or intent." .
+
+:CategoryBinding a owl:Class ;
+    rdfs:label "CategoryBinding" ;
+    rdfs:comment "Binding to a shelf category node (dotted-string id)." .
+
+:LogicEntityBinding a owl:Class ;
+    rdfs:label "LogicEntityBinding" ;
+    rdfs:comment "Binding to a shelf logic entity (UUID)." .
+
+:MetricBinding a owl:Class ;
+    rdfs:label "MetricBinding" ;
+    rdfs:comment "Binding to a concrete metric under a logic entity." .
+
+:MetricIntent a owl:Class ;
+    rdfs:label "MetricIntent" ;
+    rdfs:comment "Coarse intent bucket for metric semantics (rate, count, ratio, latency, ...)." .
+
+##############################################################################
+# Object properties
+##############################################################################
+
+:hasUtterance a owl:ObjectProperty ;
+    rdfs:domain [ owl:unionOf ( :BusinessConcept :MetricIntent :MetricBinding ) ] ;
+    rdfs:range :Utterance .
+
+:synonymOf a owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain :BusinessConcept ;
+    rdfs:range :BusinessConcept .
+
+:broaderThan a owl:ObjectProperty, owl:TransitiveProperty ;
+    rdfs:domain :BusinessConcept ;
+    rdfs:range :BusinessConcept ;
+    rdfs:comment "A broaderThan B means A is a broader concept than B." .
+
+:narrowerThan a owl:ObjectProperty, owl:TransitiveProperty ;
+    owl:inverseOf :broaderThan ;
+    rdfs:domain :BusinessConcept ;
+    rdfs:range :BusinessConcept .
+
+:mapsToCategory a owl:ObjectProperty ;
+    rdfs:domain :BusinessConcept ;
+    rdfs:range :CategoryBinding .
+
+:mapsToLogicEntity a owl:ObjectProperty ;
+    rdfs:domain :BusinessConcept ;
+    rdfs:range :LogicEntityBinding .
+
+:mapsToMetric a owl:ObjectProperty ;
+    rdfs:domain [ owl:unionOf ( :BusinessConcept :MetricIntent ) ] ;
+    rdfs:range :MetricBinding .
+
+:belongsToEntity a owl:ObjectProperty ;
+    rdfs:domain :MetricBinding ;
+    rdfs:range :LogicEntityBinding .
+
+:underCategory a owl:ObjectProperty ;
+    rdfs:domain :LogicEntityBinding ;
+    rdfs:range :CategoryBinding .
+
+:hasIntent a owl:ObjectProperty ;
+    rdfs:domain :MetricBinding ;
+    rdfs:range :MetricIntent .
+
+##############################################################################
+# Datatype / annotation properties (schema mapping to shelf API)
+##############################################################################
+
+:textValue a owl:DatatypeProperty ;
+    rdfs:domain :Utterance ;
+    rdfs:range xsd:string .
+
+:disambiguationHint a owl:DatatypeProperty ;
+    rdfs:domain [ owl:unionOf ( :MetricBinding :MetricIntent ) ] ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Non-exclusive hints for ranking (semantic features of definition/SQL/口径), not gold answers." .
+
+:shelfCategoryId a owl:AnnotationProperty ;
+    rdfs:comment "Dotted category id for getNextLevelNode." .
+
+:shelfLogicEntityId a owl:AnnotationProperty ;
+    rdfs:comment "Logic entity UUID." .
+
+:parentOperObjId a owl:AnnotationProperty ;
+    rdfs:comment "Required companion id for getLogicEntityDefineInfo." .
+
+:metricNameCn a owl:AnnotationProperty .
+:metricNameEn a owl:AnnotationProperty .
+
+:locateKeywords a owl:AnnotationProperty ;
+    rdfs:comment "Keywords recommended for locateNode when stable ids are not yet curated." .
+
+:status a owl:AnnotationProperty ;
+    rdfs:comment "active | stale | draft" .
+
+##############################################################################
+# Example MetricIntent individuals (generic buckets — not business gold paths)
+##############################################################################
+
+:IntentSuccessRate a :MetricIntent ;
+    rdfs:label "success_rate_like" ;
+    :disambiguationHint "success / 成功 / ok / 通过 等占比或成功率口径" .
+
+:IntentFillRate a :MetricIntent ;
+    rdfs:label "fill_rate_like" ;
+    :disambiguationHint "fill / 填充 / 补给 等供给侧占比口径" .
+
+:IntentExposureOrClickRate a :MetricIntent ;
+    rdfs:label "exposure_or_click_rate_like" ;
+    :disambiguationHint "exposure / click / 曝光 / 点击 等触达或交互占比口径" .
+
+:IntentCount a :MetricIntent ;
+    rdfs:label "count_like" ;
+    :disambiguationHint "次数、总量、计数类指标" .
+
+:IntentLatency a :MetricIntent ;
+    rdfs:label "latency_like" ;
+    :disambiguationHint "时延、耗时、RT 类指标" .

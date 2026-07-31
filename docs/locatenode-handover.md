@@ -126,17 +126,20 @@ DTO：`com.huawei.aiops.databp.datamodel.dto.NodeMatchDto`（字段 `id/nameCn/n
 
 - **`depth` 不可靠**：已知 bug，用户暂不修。任何层级逻辑用点分 ID 前缀，别碰 depth。
 - **`getNextLevelNode` 递归返回全部后代实体且无分页**：对高层分类调用会返回巨量数据。agent 侧靠 `skills/metric-query/SKILL.md` 的「最小覆盖根剪枝 + 只对剪枝后节点调用」控制。若未来单分类实体数失控，需要推动后端加分页/过滤（目前 databp 不可改）。
-- **`getLogicEntityRealModel` 当前返回空**，仅登记未使用。
-- **匹配算法是朴素 contains**：无同义词/拼音/模糊匹配。语义增强（小艺↔Celia）目前放在 agent 侧（skill Stage 1）。若要下沉到 locateNode，注意树的遍历每次调用都执行（无缓存），加复杂匹配时留意性能。
+- **`getLogicEntityRealModel` 已返回已部署指标（含 SQL）**，不是空对象。后续数值/画图链路：选定逻辑实体与指标 → 调该接口取 SQL → 在只读数据通道执行 → 按 `output-format.md` 绘图。执行通道与权限不在 databp 本接口内。
+- **`locateNode` 匹配算法是朴素 contains**：关键词必须出现在节点名/别名中。口语化指标定位（概念不在节点名里、多指标口径歧义）不靠继续堆同义词解决，而走**本体语义层**（见 `docs/metric-ontology-enhancement.md` 与 `ontology/metric-shelf/`），由 Skill Stage 1.5 / 5.7 锚定与消歧。
 - **平台鉴权语义**：agent/MCP 链路 = 门户会话（PORTAL）。若未来出现「必须 MACHINE 鉴权」的接口需求，需先在平台侧确认 agent 能否携带服务账号凭据，别直接写代码试。
 
 ## 8. 相关文件
 
 | 位置 | 内容 |
 |---|---|
-| `skills/metric-query/SKILL.md` | agent 工作流（意图分类→定位→剪枝→取实体→取指标→筛选→呈现），locateNode 是其中 Stage 2 的核心工具 |
-| `skills/metric-query/references/tools.md` | 全部 6 个 MCP 工具的入参/出参/要点 |
-| `skills/metric-query/references/output-format.md` | 指标字段规范、筛选语义映射、表格/图表呈现模板 |
+| `skills/metric-query/SKILL.md` | agent 工作流（意图→本体锚定→定位→剪枝→取实体→取指标→筛选→消歧→呈现→可选 RealModel 取数） |
+| `skills/metric-query/references/tools.md` | MCP 工具入参/出参/要点（含 getLogicEntityRealModel） |
+| `skills/metric-query/references/output-format.md` | 指标字段规范、筛选映射、表格/消歧/图表模板 |
+| `skills/metric-query/references/ontology.md` | 本体锚定与消歧规程 |
+| `docs/metric-ontology-enhancement.md` | 指标增强：本体语义层方案 |
+| `ontology/metric-shelf/` | TBox + 运行时 concepts.yaml |
 | databp 服务代码（不在本仓库） | locateNode controller/service/DTO，与 getModelTree 同类 |
 | MCP 平台的 swagger yaml（不在本仓库） | 工具注册契约，最新版含 locateNode，见第 3.3 节 |
 
