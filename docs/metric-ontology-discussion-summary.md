@@ -391,3 +391,21 @@ resolveSemanticQuery(structuredIntent)
 
 详细资源合同、阶段门禁、测试矩阵、迁移顺序和文件登记要求见
 [`semantic-query-ontology-migration-plan.md`](semantic-query-ontology-migration-plan.md)。
+
+## 15. 2026-08-04：阶段 0 调查后的职责收敛
+
+阶段 0 调查确认：当前 `locateNode` 先匹配 Phase A YAML，未命中时在 databp 进程内调用 `treeModelView()`；真实树提供中文、英文 aliases 字段，
+但多数为空；`locateNode` 当前未使用已经存在的五分钟模型树缓存。后续动态节点发现应优先复用或抽取这条已验证链路，不另造树查询实现，
+是否接入现有缓存留到有性能证据时决定。
+
+阶段 0 的五个开放问题按项目负责人决定关闭：
+
+1. “一般时延”不新增 alias，也不在 Java 静默解释成 avg/P50；命中 `latency` family 但未指定 variant 时返回全部 variants，由云端 Agent 追问。
+2. “黄金指标”由云端 Agent 在逻辑实体指标数据中按 `level=gold` 过滤；第一阶段不为它新增 Java FilterConcept。
+3. “最近一个月”等时间解析继续由云端 Agent / Skill 负责。
+4. 未指定内存使用率 variant 时，当前全部返回 min/max，由云端 Agent 展示或追问；Java 不替用户选择。
+5. `locateNode` 出现多个业务节点候选时当前全部返回，由云端 Agent 澄清；Java 不以“是否有数据”作为语义选择依据。
+
+因此阶段 1 的 Java 范围只包括稳定业务/指标概念资源、Concept 到真实资产的映射合同，以及必要的 loader/validator；
+时间、`level=gold` 过滤、无 variant 时的追问、节点多候选澄清继续由 Skill 承担。阶段 1 的详细执行合同见
+[`stage-1-semantic-resource-contract.md`](stage-1-semantic-resource-contract.md)。

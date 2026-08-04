@@ -375,11 +375,12 @@ QUERY_METRIC_DATA
 工作内容：
 
 1. 在实际 Java resources 根目录下新增统一语义资源目录。
-2. 定义最小 schema：business concepts、metric concepts、filters、mappings、capabilities、policies。
+2. 第一批只定义必要 schema：business concepts、metric concepts 和 mappings；capabilities/policies 先形成文档合同，等阶段 3 的计划接口需要时再决定是否资源化。
 3. 从现有 Phase A aliases、真实树非空 aliases 和 Phase B Metric Family 中只迁移 4 问需要的稳定知识，并记录来源与冲突处理。
 4. 不复制 L2.3/L2.4 整树节点。
-5. 编写 YAML 加载与静态校验测试；具体是复用现有 loader 还是新增 loader，由阶段 0 调查决定。
+5. 编写 YAML 加载与静态校验测试；优先复用现有 `OntologyLoader` / `MetricFamilyLoader` 的所在分层，真实类路径以 Java 文件地图为准。
 6. 用离线测试将 4 问人工真值编译为预期 interpretation 和 plan 快照。
+7. 时间解析、`level=gold` 过滤、未指定 metric variant 和多个节点候选的交互策略写入 Skill 合同，不在本阶段新增 Java 实现。
 
 建议的 resources 相对结构如下；`<java-resources-root>` 必须由阶段 0 填写：
 
@@ -388,13 +389,11 @@ QUERY_METRIC_DATA
 ├── model.yaml
 ├── business-concepts.yaml
 ├── metric-concepts.yaml
-├── filter-concepts.yaml
-├── mappings.yaml
-├── capabilities.yaml
-└── policies.yaml
+└── mappings.yaml
 ```
 
-文件是否需要进一步拆分，等真实规模出现后再决定。
+`model.yaml` 是否必须独立存在由 loader 实现决定；如果三个业务 YAML 已能自描述 schema，可不创建空的 `model.yaml`。
+`filter-concepts.yaml`、`capabilities.yaml` 和 `policies.yaml` 不在阶段 1 为追求目录完整而提前创建。
 
 退出门禁：
 
@@ -570,11 +569,13 @@ POLICY_BLOCKED
 | 稳定业务概念解析 | Java 语义层 |
 | 动态货架节点发现 | Java 语义层，进程内真实目录 |
 | 指标概念和不可替代规则 | Java 语义层 |
-| 过滤概念到规范条件 | Java 语义层 |
+| `level=gold` 等当前过滤 | 云端 Agent / Skill；是否下沉由后续真实需求决定 |
 | 时间表达转明确起止时间 | 云端 Agent / Skill |
 | 生成查询步骤和策略 | Java 语义层 |
 | 执行现有 MCP 工具 | 云端 Agent / Skill |
 | 用户澄清和确认 | 云端 Agent / Skill |
+| 未指定 metric variant 时展示/追问 | 云端 Agent / Skill |
+| 多个 `locateNode` 候选时澄清 | 云端 Agent / Skill |
 | 结果表格和图表 | 云端 Agent / Skill |
 | 真实指标和数值 | 现有 Java / 数据服务能力 |
 
@@ -645,9 +646,9 @@ docs/semantic-query-java-file-map.md
 | 4 问对应的真实货架 ID 和路径 | Java 弱 Agent / 项目负责人 | 阶段 0 |
 | 哪些问题可获得真实 RealModel 指标 | Java 弱 Agent | 阶段 0 |
 | 广告范围内哪些指标 ID 可完成真实数据查询 | Java 弱 Agent | 阶段 0 |
-| “一般时延”的规范 metric variant 和真实匹配依据 | Java 弱 Agent | 阶段 0 |
-| `ad` 内存使用率一次返回 min/max 两种指标的计划表示 | Java 弱 Agent / 项目负责人 | 阶段 0 |
-| 小艺黄金指标使用的真实指标目录接口和字段 | Java 弱 Agent | 阶段 0 |
+| latency family 全部 variants 的真实配置和当前接口返回能力 | Java 弱 Agent | 阶段 1 |
+| `ad` 内存使用率一次向 Agent 提供 min/max 两种指标的计划表示 | Java 弱 Agent / Skill 维护者 | 阶段 1 |
+| 小艺黄金指标使用的真实指标目录接口及 `level` 实际值 | Java 弱 Agent | 阶段 1 |
 | 过滤发生在指标解析内部还是独立步骤 | Java 弱 Agent | 阶段 1 |
 | 本体和 mapping 的 owner、审核人与发布流程 | 项目负责人 | 阶段 1 |
 | `resolveSemanticQuery` 的实际 HTTP 路径和鉴权标签 | Java 弱 Agent | 阶段 3 |
