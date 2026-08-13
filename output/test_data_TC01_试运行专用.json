@@ -1,0 +1,82 @@
+{
+  "candidate_profile": {
+    "candidate_id": "cand_001",
+    "name": "张明",
+    "target_role": "AI Agent 工程师",
+    "years_experience": 4,
+    "education": "浙江大学 计算机硕士",
+    "highlights": ["工作流编排经验"],
+    "resume_summary": "4年Agent开发经验"
+  },
+  "paper_facts": {
+    "paper_id": "paper_001",
+    "title": "工作流 Agent 可靠性增强",
+    "authors": ["张明"],
+    "venue": "internal_2025",
+    "key_claims": [
+      {
+        "claim_id": "c1",
+        "text": "提出 Kill-Switch 守卫机制",
+        "evidence_section": "3.2"
+      }
+    ],
+    "verified_facts": ["支持多节点编排"]
+  },
+  "prompt_pack": {
+    "pack_version": "1.0.0",
+    "scoring_override": null,
+    "interview_style": "technical",
+    "language": "zh-CN"
+  },
+  "is_finished": true,
+  "kill_switch_reason": "",
+  "session_state": {
+    "session_id": "sess_001",
+    "is_finished": true,
+    "kill_switch_reason": "",
+    "current_stage": "Z",
+    "started_at": "2026-06-29T09:00:00+08:00",
+    "finished_at": "2026-06-29T09:45:00+08:00",
+    "total_rounds": 3
+  },
+  "conversation_trace": {
+    "trace_id": "trace_001",
+    "turns": [
+      {
+        "turn_id": "t01",
+        "stage": "X",
+        "stage_id": 1,
+        "round_type": "foundation",
+        "role": "interviewer",
+        "content": "请介绍你的项目。"
+      },
+      {
+        "turn_id": "t02",
+        "stage": "X",
+        "stage_id": 1,
+        "round_type": "foundation",
+        "role": "candidate",
+        "content": "我做工作流编排，用状态机控制分支。"
+      },
+      {
+        "turn_id": "t03",
+        "stage": "Z",
+        "stage_id": 3,
+        "round_type": "synthesis",
+        "role": "interviewer",
+        "content": "面试结束。"
+      }
+    ]
+  },
+  "guard_status": {
+    "triggered": false,
+    "trigger_count": 0,
+    "last_trigger_turn_id": null,
+    "rules_fired": []
+  },
+  "paper_status": {
+    "validation_passed": true,
+    "unverified_claims": [],
+    "last_validated_at": "2026-06-29T09:05:00+08:00"
+  }
+}

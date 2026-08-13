@@ -61,6 +61,8 @@
       "interview_style": "technical_deep_dive",
       "language": "zh-CN"
     },
+    "is_finished": false,
+    "kill_switch_reason": "PAPER_FACT_CONFLICT: 候选人声称 P95 延迟 50ms，与 paper_facts 中 200ms 矛盾",
     "session_state": {
       "_source": "[MOCK] 将来替换为 WF_SessionManager 输出",
       "session_id": "sess_tc02_20260629",
