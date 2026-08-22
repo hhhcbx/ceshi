@@ -61,6 +61,8 @@
       "interview_style": "technical_deep_dive",
       "language": "zh-CN"
     },
+    "is_finished": true,
+    "kill_switch_reason": "",
     "session_state": {
       "_source": "[MOCK] 将来替换为 WF_SessionManager 输出",
       "session_id": "sess_tc01_20260629",

@@ -1,0 +1,994 @@
+{
+    "description": "报告结晶化【完整逻辑版】含预处理+三路分支：KILL/NORMAL→LLM，INCOMPLETE→占位",
+    "iconUri": "D1EVanKXpccTn6brOCCmwSLsw",
+    "iconUrl": "https://contentcenter-drcn.dbankcdn.com/pub_21/FaStore_fa_900_9/bb/v3/fa/osms/1/1/854afb3eb8ce40849ce3ddcb7fecb76c/50836c5b19a246cd88743cad2ec32f5c.png",
+    "name": "WF_Report_Crystallizer_MVP_1_Full",
+    "schema": {
+        "components": [
+            {
+                "id": "START7a3622b906c048ea9c33c7e5da72bfbc",
+                "type": "agentStart",
+                "dimensions": {
+                    "width": 248,
+                    "height": 380
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 0,
+                    "y": 0
+                },
+                "events": {},
+                "label": "开始_报告结晶化",
+                "description": "工作流开始的节点，用于设定启动工作流需要的信息",
+                "outputs": [
+                    {
+                        "name": "systemFields",
+                        "fields": [
+                            {
+                                "name": "USER_INPUT",
+                                "type": "String",
+                                "description": "本次对话输入内容",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "systemFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "FILES_INPUT",
+                                "type": "Array<String>",
+                                "description": "本次对话上传的文件地址",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "systemFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "EVENT_INPUT",
+                                "type": "Object",
+                                "description": "本次对话的事件内容",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "systemFields",
+                                "sourceType": "ref"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "candidate_profile",
+                                "type": "Object",
+                                "description": "候选人画像",
+                                "required": true,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "paper_facts",
+                                "type": "Object",
+                                "description": "论文事实",
+                                "required": true,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "prompt_pack",
+                                "type": "Object",
+                                "description": "Prompt 包",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "description": "会话状态",
+                                "required": true,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "description": "问答记录",
+                                "required": true,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "guard_status",
+                                "type": "Object",
+                                "description": "守卫状态",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "paper_status",
+                                "type": "Object",
+                                "description": "论文状态",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "is_finished",
+                                "type": "Boolean",
+                                "description": "是否结束（选择器用，与 session_state 保持一致）",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "kill_switch_reason",
+                                "type": "String",
+                                "description": "异常原因（选择器用，与 session_state 保持一致）",
+                                "required": false,
+                                "value": "",
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "id": "TextHandlerConcatRubric7a2b3c4d5e6f708192a3b4c5d6e7f809",
+                "type": "jiuwen.TextProcessingComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 120
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 280,
+                    "y": 0
+                },
+                "events": {},
+                "label": "字符串拼接_评分量表",
+                "description": "字符串拼接（固定拼接模式，不支持分隔）",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "candidate_profile",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.candidate_profile}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.session_state}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "prompt_pack",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.prompt_pack}",
+                                "refType": "Object"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "评分量表"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "functionality": "concat",
+                    "listJoinString": "\n",
+                    "concatTemplate": "# 固定评分量表 Score Rubric v1.0\n## 评分维度（每项 0-5 整数分，必须附 evidence 原话引用）\n### core_component_innovation\n| 分数 | 锚点描述 |\n|------|----------|\n| 0 | 无法说明任何组件职责 |\n| 1 | 仅列举组件名称，无创新点 |\n| 2 | 描述 1 个组件的基本实现 |\n| 3 | 说明 2+ 组件协作与创新动机 |\n| 4 | 有量化指标或对比实验支撑 |\n| 5 | 清晰架构演进路径与可复用抽象 |\n### state_machine_flow_control\n| 分数 | 锚点描述 |\n|------|----------|\n| 0 | 不理解状态机或流程控制 |\n| 1 | 能说出状态名称但无法解释转移条件 |\n| 2 | 能描述线性流程，缺少分支/异常处理 |\n| 3 | 能说明关键状态转移与守卫条件 |\n| 4 | 能设计可恢复/可回滚的状态机 |\n| 5 | 能结合业务场景优化状态粒度与并发控制 |\n### prompt_engineering_defense\n| 分数 | 锚点描述 |\n|------|----------|\n| 0 | 无防御意识 |\n| 1 | 知道 prompt 注入风险 |\n| 2 | 能列举 1 种防御手段 |\n| 3 | 能说明输入过滤与角色锁定 |\n| 4 | 有多层防御与审计策略 |\n| 5 | 能设计可验证的防御闭环 |\n### data_crystallization_presentation\n| 分数 | 锚点描述 |\n|------|----------|\n| 0 | 无法结构化表达 |\n| 1 | 仅罗列事实 |\n| 2 | 有基本分段 |\n| 3 | 能按维度组织证据 |\n| 4 | 有清晰评分与引用 |\n| 5 | 报告可直接用于决策\n## 元信息\n- session_id: {session_state}\n- candidate: {candidate_profile}\nprompt_pack 快照: {prompt_pack}",
+                    "customConnectionList": [
+                        {
+                            "label": "\n",
+                            "value": "\n"
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "TextHandlerConcatGrouper8b3c4d5e6f708192a3b4c5d6e7f8091a2",
+                "type": "jiuwen.TextProcessingComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 120
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 560,
+                    "y": 0
+                },
+                "events": {},
+                "label": "字符串拼接_轨迹分组",
+                "description": "字符串拼接（固定拼接模式，不支持分隔）",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.conversation_trace}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.session_state}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "score_rubric",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatRubric7a2b3c4d5e6f708192a3b4c5d6e7f809.output}",
+                                "refType": "String"
+                            },
+                            {
+                                "name": "guard_status",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.guard_status}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "paper_status",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.paper_status}",
+                                "refType": "Object"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "轨迹分组"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "functionality": "concat",
+                    "listJoinString": "\n",
+                    "concatTemplate": "# 会话轨迹阶段分组\n## 报告模式判定（LLM 必须遵守）\n1. kill_switch_reason 非空 → KILL_SWITCH\n2. is_finished=true 且无 kill_switch → NORMAL\n3. 其他 → INCOMPLETE\n当前 session_state: {session_state}\n## 原始 conversation_trace（请按 X/Y/Z 阶段自行分组）\n{conversation_trace}\n## 评分量表（上一步拼接结果）\n{score_rubric}\nguard_status: {guard_status}\npaper_status: {paper_status}",
+                    "customConnectionList": [
+                        {
+                            "label": "\n",
+                            "value": "\n"
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "Branch05e4030b71a945e6bf266c3804a0312f",
+                "type": "AgentBranch",
+                "dimensions": {
+                    "width": 248,
+                    "height": 160
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 840,
+                    "y": 0
+                },
+                "events": {},
+                "label": "选择器_报告模式",
+                "description": "KILL_SWITCH / NORMAL 走 LLM；INCOMPLETE(否则) 走占位报告，不调用 LLM",
+                "branches": [
+                    {
+                        "id": "KILL_SWITCH",
+                        "condition": "&&",
+                        "expression": [
+                            {
+                                "leftVar": {
+                                    "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.kill_switch_reason}",
+                                    "fieldType": "String",
+                                    "label": "kill_switch_reason"
+                                },
+                                "condition": "!=",
+                                "rightVar": {
+                                    "sourceType": "input",
+                                    "value": "",
+                                    "fieldType": "String",
+                                    "label": ""
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "NORMAL",
+                        "condition": "&&",
+                        "expression": [
+                            {
+                                "leftVar": {
+                                    "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.is_finished}",
+                                    "fieldType": "Boolean",
+                                    "label": "is_finished"
+                                },
+                                "condition": "==",
+                                "rightVar": {
+                                    "sourceType": "input",
+                                    "value": "true",
+                                    "fieldType": "Boolean",
+                                    "label": "true"
+                                }
+                            },
+                            {
+                                "leftVar": {
+                                    "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.kill_switch_reason}",
+                                    "fieldType": "String",
+                                    "label": "kill_switch_reason"
+                                },
+                                "condition": "==",
+                                "rightVar": {
+                                    "sourceType": "input",
+                                    "value": "",
+                                    "fieldType": "String",
+                                    "label": ""
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "id": "default"
+                    }
+                ]
+            },
+            {
+                "id": "LLM5f7a74b1e7f04d0e9a5dbe54b91f3a40",
+                "type": "AgentLargeModel",
+                "dimensions": {
+                    "width": 248,
+                    "height": 56
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1120,
+                    "y": -40
+                },
+                "events": {},
+                "label": "大模型_生成结晶化报告",
+                "description": "调用大模型生成 Markdown 报告",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "grouped_trace",
+                                "type": "String",
+                                "required": true,
+                                "description": "分组轨迹",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatGrouper8b3c4d5e6f708192a3b4c5d6e7f8091a2.output}",
+                                "refType": "String"
+                            },
+                            {
+                                "name": "score_rubric",
+                                "type": "String",
+                                "required": true,
+                                "description": "评分量表",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatRubric7a2b3c4d5e6f708192a3b4c5d6e7f809.output}",
+                                "refType": "String"
+                            },
+                            {
+                                "name": "candidate_profile",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.candidate_profile}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "paper_facts",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.paper_facts}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "prompt_pack",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.prompt_pack}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.session_state}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "guard_status",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.guard_status}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "paper_status",
+                                "type": "Object",
+                                "required": false,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.paper_status}",
+                                "refType": "Object"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "markdown_report",
+                                "type": "String",
+                                "description": "Markdown 报告",
+                                "required": false,
+                                "enabled": false
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "deployMode": "workflow",
+                    "model": {
+                        "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT",
+                        "llmBrand": "DeepSeek",
+                        "llmName": "DeepSeek-V3 增强版",
+                        "llmContextLength": "32k",
+                        "llmOwner": 1,
+                        "hyperParameters": [
+                            {
+                                "temperature": 0.2,
+                                "topP": 1,
+                                "topK": 128,
+                                "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT"
+                            }
+                        ],
+                        "llmLogo": "https://hag-ability-test.obs.cn-north-1.myhuaweicloud.com/osms/1/1/90c091f8f35f40329260d30fb279220c/b5271b5a1a8b41fba98bc506eac5d4e4.png"
+                    },
+                    "templateContent": [
+                        {
+                            "role": "system",
+                            "content": "你是「面试报告结晶化引擎」。根据输入生成仅含事实的 Markdown 报告。\n\n## 报告模式（由预处理分组说明判定）\n- KILL_SWITCH: 异常结束报告，kill_switch_info 必填\n- NORMAL: 完整终版报告，interview_rounds 按 X→Y→Z 组织\n- INCOMPLETE: 不应到达本节点（由另一分支处理）\n\n## 输出格式（6 个二级标题缺一不可）\n## candidate_summary\n## interview_rounds\n## score_table\n## kill_switch_info\n## paper_facts_snapshot\n## next_day_prep_actions\n\n## score_table 四指标\ncore_component_innovation / state_machine_flow_control / prompt_engineering_defense / data_crystallization_presentation\n格式: | metric | score(0-5) | evidence | notes |\n\n## 约束\n1. evidence 引用 turn_id 或原话；不足则 score=0 并标注 evidence_gap\n2. 禁止编造未出现的问答或事实\n3. 只输出 Markdown 正文"
+                        },
+                        {
+                            "role": "user",
+                            "content": "请生成报告。\n\n## 预处理：分组轨迹与模式说明\n{grouped_trace}\n\n## 预处理：评分量表\n{score_rubric}\n\n## 候选人画像\n{candidate_profile}\n\n## 论文事实\n{paper_facts}\n\n## Prompt 包\n{prompt_pack}\n\n## 会话状态\n{session_state}\n\n## 守卫 / 论文状态\nguard_status: {guard_status}\npaper_status: {paper_status}"
+                        }
+                    ],
+                    "responseFormat": {
+                        "type": "markdown"
+                    },
+                    "skillList": [],
+                    "context": {
+                        "dialogueHistorySwitch": true,
+                        "dialogueHistoryType": "self"
+                    }
+                },
+                "isRunLoading": false,
+                "stopRunning": true,
+                "isOpenRunDrawer": false,
+                "drawerVisible": false
+            },
+            {
+                "id": "TextHandlerConcatSchema9c4d5e6f708192a3b4c5d6e7f8091a2b3",
+                "type": "jiuwen.TextProcessingComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 120
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1400,
+                    "y": -60
+                },
+                "events": {},
+                "label": "字符串拼接_报告校验",
+                "description": "字符串拼接（固定拼接模式，不支持分隔）",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "markdown_report",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${LLM5f7a74b1e7f04d0e9a5dbe54b91f3a40.userFields.markdown_report}",
+                                "refType": "String"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "报告校验"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "functionality": "concat",
+                    "listJoinString": "\n",
+                    "concatTemplate": "# 报告完整性校验\n必填 Section: candidate_summary / interview_rounds / score_table / kill_switch_info / paper_facts_snapshot / next_day_prep_actions\n校验提示: 若缺 section 或 score_table 缺四指标，必须补全。\n---\n{markdown_report}",
+                    "customConnectionList": [
+                        {
+                            "label": "\n",
+                            "value": "\n"
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "TextHandlerConcatIncomplete0d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                "type": "jiuwen.TextProcessingComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 120
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1120,
+                    "y": 120
+                },
+                "events": {},
+                "label": "字符串拼接_未完成占位",
+                "description": "字符串拼接（固定拼接模式，不支持分隔）",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "candidate_profile",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.candidate_profile}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.conversation_trace}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "paper_facts",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.paper_facts}",
+                                "refType": "Object"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "sourceType": "ref",
+                                "value": "${START7a3622b906c048ea9c33c7e5da72bfbc.userFields.session_state}",
+                                "refType": "Object"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "未完成占位"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "functionality": "concat",
+                    "listJoinString": "\n",
+                    "concatTemplate": "# 面试报告（会话未完成）\n\n> **report_mode**: INCOMPLETE\n> 会话尚未结束，跳过 LLM 全量报告生成。\n\n## candidate_summary\n- 候选人: {candidate_profile}\n- 会话状态: 进行中\n\n## interview_rounds\n{conversation_trace}\n\n## score_table\n| metric | score | evidence |\n|--------|-------|----------|\n| core_component_innovation | N/A | 会话未完成 |\n| state_machine_flow_control | N/A | 会话未完成 |\n| prompt_engineering_defense | N/A | 会话未完成 |\n| data_crystallization_presentation | N/A | 会话未完成 |\n\n## kill_switch_info\n- triggered: false\n\n## paper_facts_snapshot\n{paper_facts}\n\n## next_day_prep_actions\n1. 继续完成面试轮次后再触发本工作流。\n2. 确认 session_state.is_finished 为 true。",
+                    "customConnectionList": [
+                        {
+                            "label": "\n",
+                            "value": "\n"
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                "type": "jiuwen.TextProcessingComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 120
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1540,
+                    "y": 20
+                },
+                "events": {},
+                "label": "字符串拼接_汇聚报告",
+                "description": "字符串拼接（固定拼接模式，不支持分隔）",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "llm_path_report",
+                                "type": "String",
+                                "required": false,
+                                "description": "LLM+校验支路",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatSchema9c4d5e6f708192a3b4c5d6e7f8091a2b3.output}",
+                                "refType": "String"
+                            },
+                            {
+                                "name": "incomplete_path_report",
+                                "type": "String",
+                                "required": false,
+                                "description": "未完成支路",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatIncomplete0d5e6f708192a3b4c5d6e7f8091a2b3c4.output}",
+                                "refType": "String"
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "汇聚报告"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "functionality": "concat",
+                    "listJoinString": "\n",
+                    "concatTemplate": "{llm_path_report}{incomplete_path_report}",
+                    "customConnectionList": [
+                        {
+                            "label": "\n",
+                            "value": "\n"
+                        }
+                    ]
+                }
+            },
+            {
+                "id": "outputComponent81923859930141d5a4e710f4e96002dc8db93a21cb79413abcb218f63a0ea875",
+                "type": "xiaoyi.outputComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 144
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1680,
+                    "y": 0
+                },
+                "events": {},
+                "label": "输出_报告流式输出",
+                "description": "",
+                "inputs": [],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "output",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "value": "${TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5.output}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "isStreamOut": false
+                            }
+                        ]
+                    },
+                    {
+                        "name": "combinationConfig",
+                        "fields": []
+                    }
+                ],
+                "configs": {
+                    "responseTemplate": "${output}",
+                    "isStreamOut": true,
+                    "isStreamingText": true,
+                    "outputMode": "OutputStream",
+                    "context": {
+                        "dialogueHistorySwitch": true
+                    }
+                }
+            },
+            {
+                "id": "END0990bdf9a33748179a3fd2b2dbee8220",
+                "type": "agentEnd",
+                "dimensions": {
+                    "width": 248,
+                    "height": 44
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1960,
+                    "y": 0
+                },
+                "events": {},
+                "label": "结束",
+                "description": "工作流的结束节点，工作流的运行结果将返回给智能体",
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "markdown_report",
+                                "type": "String",
+                                "required": true,
+                                "description": "最终 Markdown 报告",
+                                "sourceType": "ref",
+                                "value": "${TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5.output}",
+                                "refType": "String",
+                                "isStreamOut": true
+                            }
+                        ]
+                    },
+                    {
+                        "name": "combinationConfig",
+                        "fields": []
+                    }
+                ],
+                "configs": {
+                    "isStreamOut": false,
+                    "responseMode": "returnVariables",
+                    "responseTemplate": "",
+                    "responseLabel": "返回变量",
+                    "isStreamingText": false
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "edge_0e7f7351e4fc",
+                "type": "custom",
+                "source": "START7a3622b906c048ea9c33c7e5da72bfbc",
+                "target": "TextHandlerConcatRubric7a2b3c4d5e6f708192a3b4c5d6e7f809",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_a449e3b058a0",
+                "type": "custom",
+                "source": "TextHandlerConcatRubric7a2b3c4d5e6f708192a3b4c5d6e7f809",
+                "target": "TextHandlerConcatGrouper8b3c4d5e6f708192a3b4c5d6e7f8091a2",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_14e8c0a7ca77",
+                "type": "custom",
+                "source": "TextHandlerConcatGrouper8b3c4d5e6f708192a3b4c5d6e7f8091a2",
+                "target": "Branch05e4030b71a945e6bf266c3804a0312f",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_6b446bbd803a",
+                "type": "custom",
+                "source": "Branch05e4030b71a945e6bf266c3804a0312f",
+                "target": "LLM5f7a74b1e7f04d0e9a5dbe54b91f3a40",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                },
+                "sourceHandle": "KILL_SWITCH",
+                "targetHandle": "model_left",
+                "branchId": "KILL_SWITCH"
+            },
+            {
+                "id": "edge_9e2d20bbfde0",
+                "type": "custom",
+                "source": "Branch05e4030b71a945e6bf266c3804a0312f",
+                "target": "LLM5f7a74b1e7f04d0e9a5dbe54b91f3a40",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                },
+                "sourceHandle": "NORMAL",
+                "targetHandle": "model_left",
+                "branchId": "NORMAL"
+            },
+            {
+                "id": "edge_0a7f6272c83f",
+                "type": "custom",
+                "source": "Branch05e4030b71a945e6bf266c3804a0312f",
+                "target": "TextHandlerConcatIncomplete0d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                },
+                "sourceHandle": "default",
+                "branchId": "default"
+            },
+            {
+                "id": "edge_1c6050b5229e",
+                "type": "custom",
+                "source": "LLM5f7a74b1e7f04d0e9a5dbe54b91f3a40",
+                "target": "TextHandlerConcatSchema9c4d5e6f708192a3b4c5d6e7f8091a2b3",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_2c702d270a5c",
+                "type": "custom",
+                "source": "TextHandlerConcatSchema9c4d5e6f708192a3b4c5d6e7f8091a2b3",
+                "target": "TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_59c35423ea75",
+                "type": "custom",
+                "source": "TextHandlerConcatIncomplete0d5e6f708192a3b4c5d6e7f8091a2b3c4",
+                "target": "TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_32715b19d557",
+                "type": "custom",
+                "source": "TextHandlerConcatMerge1e6f708192a3b4c5d6e7f8091a2b3c4d5",
+                "target": "outputComponent81923859930141d5a4e710f4e96002dc8db93a21cb79413abcb218f63a0ea875",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge_4b584fa403ee",
+                "type": "custom",
+                "source": "outputComponent81923859930141d5a4e710f4e96002dc8db93a21cb79413abcb218f63a0ea875",
+                "target": "END0990bdf9a33748179a3fd2b2dbee8220",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            }
+        ]
+    },
+    "version": "0",
+    "workflowSide": "cloud"
+}
