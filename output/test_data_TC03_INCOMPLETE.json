@@ -1,0 +1,38 @@
+{
+  "_test_meta": {
+    "test_case_id": "TC03_INCOMPLETE",
+    "description": "会话未完成：应走 default 分支，不调用 LLM，输出占位报告",
+    "expected_branch": "default",
+    "expected_report_mode": "INCOMPLETE",
+    "applicable_workflow": "WF_Report_Crystallizer_MVP_1-V0_full.json"
+  },
+  "userFields": {
+    "candidate_profile": {
+      "candidate_id": "cand_003",
+      "name": "李华",
+      "target_role": "后端工程师"
+    },
+    "paper_facts": {
+      "paper_id": "paper_003",
+      "title": "分布式缓存优化",
+      "key_claims": []
+    },
+    "prompt_pack": {},
+    "is_finished": false,
+    "kill_switch_reason": "",
+    "session_state": {
+      "session_id": "sess_003",
+      "is_finished": false,
+      "kill_switch_reason": "",
+      "current_stage": "Y"
+    },
+    "conversation_trace": {
+      "turns": [
+        {"turn_id": "t01", "stage": "X", "role": "interviewer", "content": "介绍项目"},
+        {"turn_id": "t02", "stage": "X", "role": "candidate", "content": "做过缓存系统"}
+      ]
+    },
+    "guard_status": {"triggered": false},
+    "paper_status": {"validation_passed": true}
+  }
+}

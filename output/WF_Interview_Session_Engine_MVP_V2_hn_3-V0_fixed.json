@@ -1,0 +1,879 @@
+{
+    "description": "面试会话引擎 V2 v4：类型对齐 MVP_1，conversation_trace_in/out 分离",
+    "iconUri": "D1EXoq5m1fpQ2SSSWi5R0MUAw",
+    "iconUrl": "https://contentcenter-drcn.dbankcdn.com/pub_21/FaStore_fa_900_9/bb/v3/fa/osms/1/1/258f1e01664a482287667a426dc88418/53d0cad8b723480ca1db00ccc049ce05.png",
+    "name": "WF_Interview_Session_Engine_MVP_V2_hn_3",
+    "schema": {
+        "components": [
+            {
+                "id": "START2e5c8578e5ad405aac34381256907cc0",
+                "type": "agentStart",
+                "dimensions": {
+                    "width": 248,
+                    "height": 44
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": -4.6821590475162935,
+                    "y": -43.30298536756374
+                },
+                "events": {},
+                "label": "开始_面试会话引擎",
+                "outputs": [
+                    {
+                        "name": "systemFields",
+                        "fields": [
+                            {
+                                "name": "USER_INPUT",
+                                "type": "String",
+                                "description": "本次对话输入内容",
+                                "required": false,
+                                "value": "",
+                                "id": 525,
+                                "fieldType": "systemFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "FILES_INPUT",
+                                "type": "Array<String>",
+                                "description": "本次对话上传的文件地址",
+                                "required": false,
+                                "value": "",
+                                "id": 486,
+                                "fieldType": "systemFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "EVENT_INPUT",
+                                "type": "Object",
+                                "description": "本次对话的事件内容",
+                                "required": false,
+                                "value": "",
+                                "id": 916,
+                                "fieldType": "systemFields",
+                                "sourceType": "ref",
+                                "nextOutputParamInfo": [
+                                    {
+                                        "name": "EventName",
+                                        "type": "String",
+                                        "description": "",
+                                        "required": false,
+                                        "value": "",
+                                        "sourceType": "ref",
+                                        "expanded": false,
+                                        "descExpanded": false
+                                    },
+                                    {
+                                        "name": "EventPayload",
+                                        "type": "Object",
+                                        "description": "",
+                                        "required": false,
+                                        "value": "",
+                                        "sourceType": "ref",
+                                        "expanded": false,
+                                        "descExpanded": false
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "prompt_pack",
+                                "type": "String",
+                                "description": "面试官 Prompt 包",
+                                "required": true,
+                                "value": "",
+                                "id": 151,
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "runtime_config",
+                                "type": "Object",
+                                "description": "运行配置",
+                                "required": false,
+                                "value": "",
+                                "id": 257,
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "description": "当前会话状态；首次可为空",
+                                "required": false,
+                                "value": "",
+                                "id": 129,
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "conversation_trace",
+                                "type": "Object",
+                                "description": "历史问答，首次传 {\"turns\":[]}",
+                                "required": false,
+                                "value": "",
+                                "id": 782,
+                                "fieldType": "userFields",
+                                "sourceType": "ref",
+                                "nextOutputParamInfo": [
+                                    {
+                                        "name": "turns",
+                                        "type": "Object",
+                                        "description": "问答轮次",
+                                        "required": false,
+                                        "value": "",
+                                        "sourceType": "ref",
+                                        "expanded": true,
+                                        "descExpanded": false
+                                    }
+                                ]
+                            },
+                            {
+                                "name": "user_answer",
+                                "type": "String",
+                                "description": "用户对上一题的回答；首次可为空",
+                                "required": false,
+                                "value": "",
+                                "id": 975,
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            },
+                            {
+                                "name": "current_stage",
+                                "type": "String",
+                                "description": "默认值为X_BASE",
+                                "required": false,
+                                "value": "",
+                                "id": 227,
+                                "fieldType": "userFields",
+                                "sourceType": "ref"
+                            }
+                        ]
+                    }
+                ],
+                "description": "工作流开始的节点，用于设定启动工作流需要的信息"
+            },
+            {
+                "id": "LLM1979f9a7d4f541a79c6babe12f61cb31",
+                "type": "AgentLargeModel",
+                "dimensions": {
+                    "width": 248,
+                    "height": 56
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 378.95658850851044,
+                    "y": 319.3889328900163
+                },
+                "events": {},
+                "label": "大模型_推进一次面试-1",
+                "description": "调用大模型，根据入参和Prompt，生成回复",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "prompt_pack",
+                                "type": "String",
+                                "required": true,
+                                "description": "面试官 Prompt 包",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.prompt_pack}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "runtime_config",
+                                "type": "Object",
+                                "required": true,
+                                "description": "运行配置",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.runtime_config}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": false,
+                                "description": "会话状态",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.session_state}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "conversation_trace_in",
+                                "type": "Object",
+                                "required": false,
+                                "description": "历史问答",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.conversation_trace}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "user_answer",
+                                "type": "String",
+                                "required": false,
+                                "description": "用户回答",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.user_answer}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "current_stage",
+                                "type": "String",
+                                "required": false,
+                                "description": "当前阶段",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.current_stage}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "session_step_json",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "interviewer_question",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "current_stage_out",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "is_finished_out",
+                                "type": "Boolean",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "description": "会话状态",
+                                "required": false,
+                                "enabled": true
+                            },
+                            {
+                                "name": "conversation_trace_out",
+                                "type": "Object",
+                                "description": "更新后的问答记录 {turns:[]}",
+                                "required": false,
+                                "enabled": true
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "deployMode": "workflow",
+                    "model": {
+                        "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT",
+                        "llmBrand": "DeepSeek",
+                        "llmName": "DeepSeek-V3 增强版",
+                        "llmContextLength": "32k",
+                        "llmOwner": 1,
+                        "hyperParameters": [
+                            {
+                                "temperature": 0.3,
+                                "topP": 1,
+                                "topK": 128,
+                                "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT"
+                            }
+                        ],
+                        "llmLogo": "https://hag-ability-test.obs.cn-north-1.myhuaweicloud.com/osms/1/1/90c091f8f35f40329260d30fb279220c/b5271b5a1a8b41fba98bc506eac5d4e4.png"
+                    },
+                    "templateContent": [
+                        {
+                            "role": "system",
+                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace_in、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. conversation_trace_out 必须是对象，格式为 {\"turns\": [...]}，每轮追加记录\n4. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n5. conversation_trace_in.turns 为空时使用 []\n6. current_stage 为空时使用 X_BASE"
+                        },
+                        {
+                            "role": "user",
+                            "content": "你是面试会话引擎。推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace_in: {conversation_trace_in}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 读取 conversation_trace_in.turns，本轮必须更新 conversation_trace_out.turns（追加或填写 answer）\n2. user_answer 非空时，把上一题和答案写入 turns\n3. 禁止 conversation_trace_out 与 conversation_trace_in 完全相同\n4. 按 X_BASE → Y_PROJECT → Z_EXTEND 推进\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace_out\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false\n}"
+                        }
+                    ],
+                    "responseFormat": {
+                        "type": "json"
+                    },
+                    "skillList": [],
+                    "context": {
+                        "dialogueHistorySwitch": true,
+                        "dialogueHistoryType": "self"
+                    }
+                },
+                "isRunLoading": false,
+                "stopRunning": true,
+                "isOpenRunDrawer": false,
+                "drawerVisible": false
+            },
+            {
+                "id": "ENDf3e1bcb7064b41db9fd52aaad1b4af32",
+                "type": "agentEnd",
+                "dimensions": {
+                    "width": 248,
+                    "height": 107
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1582.27505777747,
+                    "y": -123.08297726585647
+                },
+                "events": {},
+                "label": "结束",
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "session_step_json",
+                                "type": "String",
+                                "required": true,
+                                "description": "MVP 兜底完整 JSON",
+                                "sourceType": "ref",
+                                "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.session_step_json}",
+                                "refType": "String",
+                                "isStreamOut": false
+                            }
+                        ]
+                    },
+                    {
+                        "name": "combinationConfig",
+                        "fields": []
+                    }
+                ],
+                "description": "工作流的结束节点，工作流的运行结果将返回给智能体",
+                "configs": {
+                    "isStreamOut": false,
+                    "responseMode": "returnVariables",
+                    "responseTemplate": "",
+                    "responseLabel": "返回变量",
+                    "isStreamingText": false
+                }
+            },
+            {
+                "id": "outputComponent326977145f934cf69c6dec7d4afb2472",
+                "type": "xiaoyi.outputComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 192
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 1303.9995773626101,
+                    "y": -141.832138611417
+                },
+                "events": {},
+                "label": "输出",
+                "description": "",
+                "inputs": [],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "interviewer_question",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.interviewer_question}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "isStreamOut": false
+                            },
+                            {
+                                "name": "conversation_trace_out",
+                                "type": "Object",
+                                "required": true,
+                                "description": "",
+                                "value": "${LLM703a1311197a49509c6973146daa59b6.userFields.conversation_trace_out}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "isStreamOut": false
+                            }
+                        ]
+                    },
+                    {
+                        "name": "combinationConfig",
+                        "fields": []
+                    }
+                ],
+                "configs": {
+                    "responseTemplate": "${interviewer_question}",
+                    "isStreamOut": false,
+                    "isStreamingText": false,
+                    "outputMode": "OutputStream",
+                    "context": {
+                        "dialogueHistorySwitch": true
+                    }
+                }
+            },
+            {
+                "id": "LLM703a1311197a49509c6973146daa59b6",
+                "type": "AgentLargeModel",
+                "dimensions": {
+                    "width": 248,
+                    "height": 473
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 982.9336973379498,
+                    "y": -163.0870662218398
+                },
+                "events": {},
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "prompt_pack",
+                                "type": "String",
+                                "required": true,
+                                "description": "面试官 Prompt 包",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.prompt_pack}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "runtime_config",
+                                "type": "Object",
+                                "required": true,
+                                "description": "运行配置",
+                                "value": "${START2e5c8578e5ad405aac34381256907cc0.userFields.runtime_config}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "required": false,
+                                "description": "会话状态",
+                                "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.session_state}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "conversation_trace_in",
+                                "type": "Object",
+                                "required": false,
+                                "description": "上一步问答记录",
+                                "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.conversation_trace_out}",
+                                "sourceType": "ref",
+                                "refType": "Object",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "user_answer",
+                                "type": "String",
+                                "required": false,
+                                "description": "提问器回答",
+                                "value": "${Questioner358948a33f8c48c0aa009b50b57e2935.preDefinedFields.userResponse}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            },
+                            {
+                                "name": "current_stage",
+                                "type": "String",
+                                "required": false,
+                                "description": "当前阶段",
+                                "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.current_stage_out}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "expanded": false,
+                                "descExpanded": false
+                            }
+                        ]
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "session_step_json",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "interviewer_question",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "current_stage_out",
+                                "type": "String",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "is_finished_out",
+                                "type": "Boolean",
+                                "description": "",
+                                "required": false,
+                                "enabled": false
+                            },
+                            {
+                                "name": "session_state",
+                                "type": "Object",
+                                "description": "会话状态",
+                                "required": false,
+                                "enabled": true
+                            },
+                            {
+                                "name": "conversation_trace_out",
+                                "type": "Object",
+                                "description": "更新后的问答记录 {turns:[]}",
+                                "required": false,
+                                "enabled": true
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "deployMode": "workflow",
+                    "model": {
+                        "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT",
+                        "llmBrand": "DeepSeek",
+                        "llmName": "DeepSeek-V3 增强版",
+                        "llmContextLength": "32k",
+                        "llmOwner": 1,
+                        "hyperParameters": [
+                            {
+                                "temperature": 0.3,
+                                "topP": 1,
+                                "topK": 128,
+                                "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT"
+                            }
+                        ],
+                        "llmLogo": "https://hag-ability-test.obs.cn-north-1.myhuaweicloud.com/osms/1/1/90c091f8f35f40329260d30fb279220c/b5271b5a1a8b41fba98bc506eac5d4e4.png"
+                    },
+                    "templateContent": [
+                        {
+                            "role": "system",
+                            "content": "你是“算法面试会话状态机”，不是普通聊天助手。\n\n你的唯一任务是根据输入的 prompt_pack、runtime_config、session_state、conversation_trace_in、user_answer、current_stage，推进一次面试会话状态，并生成下一步面试问题或结束状态。\n\n你必须严格遵守以下原则：\n\n1. 只推进一次面试状态\n2. 面试阶段固定为：X_BASE → Y_PROJECT → Z_EXTEND → DONE\n3. conversation_trace_out 必须是对象，格式为 {\"turns\": [...]}，每轮追加记录\n4. 只输出严格 JSON，不要 Markdown，不要代码块，不要解释\n5. conversation_trace_in.turns 为空时使用 []\n6. current_stage 为空时使用 X_BASE"
+                        },
+                        {
+                            "role": "user",
+                            "content": "你是面试会话引擎。推进一次面试状态，输出严格 JSON，不要 Markdown。\n\nprompt_pack: {prompt_pack}\nruntime_config: {runtime_config}\nsession_state: {session_state}\nconversation_trace_in: {conversation_trace_in}\nuser_answer: {user_answer}\ncurrent_stage: {current_stage}\n\n规则：\n1. 读取 conversation_trace_in.turns，本轮必须更新 conversation_trace_out.turns（追加或填写 answer）\n2. user_answer 非空时，把上一题和答案写入 turns\n3. 禁止 conversation_trace_out 与 conversation_trace_in 完全相同\n4. 按 X_BASE → Y_PROJECT → Z_EXTEND 推进\n\n输出 JSON Schema：\n{\n  \"session_state\": {\n    \"current_stage\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n    \"stage_round_counter\": {\"X_BASE\": 0, \"Y_PROJECT\": 0, \"Z_EXTEND\": 0},\n    \"turn_counter_in_current_round\": 0,\n    \"is_finished\": false,\n    \"kill_switch_reason\": \"\",\n    \"last_question_id\": \"\",\n    \"last_question\": \"\",\n    \"last_stage\": \"\",\n    \"last_round_index\": 0,\n    \"last_turn_index\": 0\n  },\n  \"conversation_trace_out\": {\n    \"turns\": [\n      {\n        \"stage\": \"string\",\n        \"round_index\": 0,\n        \"turn_index\": 0,\n        \"question\": \"string\",\n        \"answer\": \"string\",\n        \"trace_type\": \"normal|empty_answer|defense_rejection\"\n      }\n    ]\n  },\n  \"interviewer_question\": \"string\",\n  \"current_stage_out\": \"X_BASE|Y_PROJECT|Z_EXTEND|DONE\",\n  \"is_finished_out\": false\n}"
+                        }
+                    ],
+                    "responseFormat": {
+                        "type": "json"
+                    },
+                    "skillList": [],
+                    "context": {
+                        "dialogueHistorySwitch": true,
+                        "dialogueHistoryType": "self"
+                    }
+                },
+                "label": "大模型",
+                "description": "调用大模型，根据入参和Prompt，生成回复",
+                "isRunLoading": false,
+                "stopRunning": true,
+                "isOpenRunDrawer": false,
+                "drawerVisible": false
+            },
+            {
+                "id": "Questioner358948a33f8c48c0aa009b50b57e2935",
+                "type": "jiuwen.QuestionerComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 44
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 969.7696798421281,
+                    "y": 373.6386307336006
+                },
+                "events": {},
+                "label": "提问器",
+                "description": "直接问答、参数提取&追问",
+                "inputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "qustion",
+                                "type": "String",
+                                "required": false,
+                                "description": "",
+                                "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.interviewer_question}",
+                                "sourceType": "ref",
+                                "refType": "String"
+                            }
+                        ]
+                    },
+                    {
+                        "name": "preDefinedFields",
+                        "fields": []
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "preDefinedFields",
+                        "fields": [
+                            {
+                                "name": "userResponse",
+                                "displayName": "USER_RESPONSE",
+                                "type": "String",
+                                "required": true,
+                                "description": "用户本轮回答内容"
+                            }
+                        ]
+                    }
+                ],
+                "configs": {
+                    "modelConfigs": {
+                        "llmName": "DeepSeek-V3 增强版",
+                        "llmContextLength": "32k",
+                        "llmOwner": 1,
+                        "hyperParameters": {
+                            "temperature": 0.2,
+                            "topP": 0.9
+                        },
+                        "llmId": "AGENT-PLATFORM-DEEPSEEK-V3-SFT",
+                        "llmBrand": "DeepSeek"
+                    },
+                    "extraInstruction": "",
+                    "questionContent": "${qustion}",
+                    "isExtractedFields": false,
+                    "isExtractedSlotFields": true,
+                    "extractedFields": [
+                        {
+                            "fieldName": "",
+                            "description": "",
+                            "cnFieldName": "",
+                            "defaultValue": "",
+                            "required": true,
+                            "fieldType": "String",
+                            "refValue": "",
+                            "sourceType": "ref"
+                        }
+                    ],
+                    "resultFields": [
+                        {
+                            "name": "extractedResult",
+                            "displayName": "EXTRACTED_RESULT",
+                            "type": "Object",
+                            "required": true,
+                            "description": "动态生成槽位结果"
+                        }
+                    ],
+                    "maxResponse": 5,
+                    "responseType": "reply_directly",
+                    "optionType": "reply_based_on_options",
+                    "branches": [
+                        {
+                            "branchId": "branch_1",
+                            "catalog": ""
+                        },
+                        {
+                            "branchId": "branch_2",
+                            "catalog": ""
+                        },
+                        {
+                            "branchId": "default",
+                            "catalog": "默认类别"
+                        }
+                    ],
+                    "context": {
+                        "dialogueHistorySwitch": false,
+                        "dialogueHistoryType": "self"
+                    },
+                    "maxTimeOut": 30,
+                    "timeOutWarnsMessage": ""
+                }
+            },
+            {
+                "id": "outputComponent0673505583e941029b0f043355afa099",
+                "type": "xiaoyi.outputComponent",
+                "dimensions": {
+                    "width": 248,
+                    "height": 44
+                },
+                "selected": false,
+                "dragging": false,
+                "resizing": false,
+                "initialized": false,
+                "isParent": false,
+                "position": {
+                    "x": 693.0866619747707,
+                    "y": 401.2127501473183
+                },
+                "events": {},
+                "label": "输出_1",
+                "description": "",
+                "inputs": [],
+                "outputs": [
+                    {
+                        "name": "userFields",
+                        "fields": [
+                            {
+                                "name": "qustion",
+                                "type": "String",
+                                "required": true,
+                                "description": "",
+                                "value": "${LLM1979f9a7d4f541a79c6babe12f61cb31.userFields.interviewer_question}",
+                                "sourceType": "ref",
+                                "refType": "String",
+                                "isStreamOut": false
+                            }
+                        ]
+                    },
+                    {
+                        "name": "combinationConfig",
+                        "fields": []
+                    }
+                ],
+                "configs": {
+                    "responseTemplate": "${qustion}",
+                    "isStreamOut": false,
+                    "isStreamingText": false,
+                    "outputMode": "OutputStream",
+                    "context": {
+                        "dialogueHistorySwitch": true
+                    }
+                }
+            }
+        ],
+        "connections": [
+            {
+                "id": "edge_start_step1",
+                "type": "custom",
+                "source": "START2e5c8578e5ad405aac34381256907cc0",
+                "target": "LLM1979f9a7d4f541a79c6babe12f61cb31",
+                "targetHandle": "model_left",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge52ca3e6fe7214862ad9d9f8165d81856",
+                "type": "custom",
+                "source": "outputComponent326977145f934cf69c6dec7d4afb2472",
+                "target": "ENDf3e1bcb7064b41db9fd52aaad1b4af32",
+                "sourceHandle": "code_right",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edgefe9bd7744c3d4fc990ff3fb957856adb",
+                "type": "custom",
+                "source": "LLM1979f9a7d4f541a79c6babe12f61cb31",
+                "target": "outputComponent0673505583e941029b0f043355afa099",
+                "sourceHandle": "model_right",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge68cb647aad9543509e437c0e0a739bc7",
+                "type": "custom",
+                "source": "outputComponent0673505583e941029b0f043355afa099",
+                "target": "Questioner358948a33f8c48c0aa009b50b57e2935",
+                "sourceHandle": "code_right",
+                "targetHandle": "model_left",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge0c0ef0df7d604edda02d0c904b07ca96",
+                "type": "custom",
+                "source": "Questioner358948a33f8c48c0aa009b50b57e2935",
+                "target": "LLM703a1311197a49509c6973146daa59b6",
+                "sourceHandle": "questioner_reply_directly_right",
+                "targetHandle": "model_left",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            },
+            {
+                "id": "edge01c9fc16414c459d9899d2ad72f33a5d",
+                "type": "custom",
+                "source": "LLM703a1311197a49509c6973146daa59b6",
+                "target": "outputComponent326977145f934cf69c6dec7d4afb2472",
+                "sourceHandle": "model_right",
+                "style": {
+                    "stroke": "#777",
+                    "strokeWidth": 1
+                }
+            }
+        ]
+    },
+    "version": "0",
+    "workflowSide": "cloud"
+}
