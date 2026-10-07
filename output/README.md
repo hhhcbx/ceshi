@@ -1,37 +1,53 @@
-# WF_Report_Crystallizer 测试数据说明
+# WF_Report_Crystallizer 工作流说明
 
-## 文件清单
+## 两个版本（请先导入可运行版）
 
-| 文件 | 场景 | 预期分支 |
+| 文件 | 用途 | 结构 |
+|------|------|------|
+| **`WF_Report_Crystallizer_MVP_1-V0_minimal.json`** | **确保能运行** | `START → LLM → Output → End` |
+| `WF_Report_Crystallizer_MVP_1-V0_full.json` | 完整业务逻辑 | `START → 拼接×2 → 选择器 → LLM/占位 → 汇聚 → Output → End` |
+
+### 可运行版（minimal）
+
+- 无文本预处理节点、无选择器
+- 评分量表与轨迹分组逻辑**内嵌在 LLM System/User Prompt**
+- 与 `WF_Interview_Session_Engine_MVP_1` 同样简洁，已验证可跑通的路径
+
+### 完整逻辑版（full）
+
+| 分支 | 条件 | 路径 | 行为 |
+|------|------|------|------|
+| KILL_SWITCH | `kill_switch_reason` 非空 | 预处理 → **LLM** → 校验 → 汇聚 | 异常结束报告 |
+| NORMAL | `is_finished=true` 且无 kill_switch | 预处理 → **LLM** → 校验 → 汇聚 | 完整终版报告 |
+| INCOMPLETE（否则） | 其他 | 预处理 → **占位拼接** → 汇聚 | **不调用 LLM** |
+
+文本节点已拆为独立「字符串拼接_xxx」组件：
+- 描述仅保留拼接模式，**已移除 split 相关配置字段**
+- 统一输出字段名为 `output`（避免平台切换拼接/分隔后模板丢失）
+
+## 测试数据
+
+| 文件 | 场景 | 用于版本 |
 |------|------|----------|
-| `test_data_TC01_NORMAL_FINISHED.json` | 面试正常结束 | `NORMAL` |
-| `test_data_TC02_KILL_SWITCH.json` | 论文事实冲突触发守卫 | `KILL_SWITCH` |
+| `test_data_TC01_试运行专用.json` | NORMAL 快速试跑 | minimal / full |
+| `test_data_TC01_NORMAL_FINISHED.json` | 正常结束 | full |
+| `test_data_TC02_KILL_SWITCH.json` | 守卫触发 | full |
 
-## 在小艺开放平台试运行
+试运行时请在开始节点同时传入顶层字段（与 `session_state` 保持一致）：
 
-1. 导入 `WF_Report_Crystallizer_MVP.json`
-2. 打开工作流 **试运行**
-3. 在「开始_报告结晶化」节点，将测试 JSON 中 `userFields`（及可选 `systemFields`）逐项填入对应输入参数
-4. 观察选择器走向与最终 `markdown_report` 是否包含 6 个必填 section
+```json
+"is_finished": true,
+"kill_switch_reason": ""
+```
 
-## 预期行为
+## 推荐步骤
 
-### TC01 — NORMAL
+1. 先导入 **`WF_Report_Crystallizer_MVP_1-V0_minimal.json`**，用 `test_data_TC01_试运行专用.json` 验证
+2. 确认能跑通后，再导入 **`WF_Report_Crystallizer_MVP_1-V0_full.json`** 验证三分支
+3. INCOMPLETE 测试：将 `is_finished` 设为 `false`，`kill_switch_reason` 留空
 
-- 路径：`开始 → 评分量表 → 轨迹分组 → 选择器(NORMAL) → 大模型 → 完整性校验 → 流式输出 → 结束`
-- `score_table` 四指标均有 0-5 分数与 evidence
-- `kill_switch_info` 中 `triggered: false`
+## 重新生成 JSON
 
-### TC02 — KILL_SWITCH
-
-- 路径：`开始 → … → 选择器(KILL_SWITCH) → 大模型 → …`
-- `kill_switch_info` 必须写明 `PAPER_FACT_CONFLICT` 及触发轮次 `t05`
-- `score_table` 仍可输出，证据不足维度标注 `evidence_gap`
-
-## 占位数据说明
-
-所有 `_source: "[MOCK] ..."` 及 `_test_meta` 字段为测试/文档用途，**不要**传入生产工作流开始节点；接入时删除这些字段，改为上游真实输出。
-
-## 可选第三场景（手动验证）
-
-将 TC01 的 `session_state.is_finished` 改为 `false` 且清空 `kill_switch_reason`，可验证 **default / INCOMPLETE** 分支，输出占位报告而不调用全量 LLM。
+```bash
+python3 scripts/build_workflow_versions.py
+```
